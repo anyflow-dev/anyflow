@@ -1,4 +1,4 @@
-use futures::future::join_all;
+
 use futures::future::FutureExt;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
@@ -104,11 +104,11 @@ pub struct DAGNode {
 fn handle_wrapper<'a, E: Send + Sync>(
     _graph_args: &'a Arc<E>,
     _input: Arc<NodeResult>,
-    params: Box<RawValue>,
+    _params: Box<RawValue>,
 ) -> NodeResult {
-    let mut t = NodeResult::new();
+    let t = NodeResult::new();
     t.set("xxx", &DAGConfig::default());
-    let c = t.get::<DAGConfig>("xxx");
+    let _c = t.get::<DAGConfig>("xxx");
     t
 }
 
