@@ -86,6 +86,8 @@ struct NodeConfig {
     params: Box<RawValue>,
     #[serde(default)]
     necessary: bool,
+    #[serde(default)]
+    cachable: bool,
 }
 
 #[derive(Deserialize, Default, Debug, Clone)]
@@ -102,9 +104,12 @@ pub struct DAGNode {
 fn handle_wrapper<'a, E: Send + Sync>(
     _graph_args: &'a Arc<E>,
     _input: Arc<NodeResult>,
-    // params: Arc<AnyParams>,
+    params: Box<RawValue>,
 ) -> NodeResult {
-    NodeResult::new()
+    let mut t = NodeResult::new();
+    t.set("xxx", &DAGConfig::default());
+    let c = t.get::<DAGConfig>("xxx");
+    t
 }
 
 pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
@@ -120,7 +125,7 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
     // register
     node_mapping: HashMap<
         String,
-        Arc<dyn for<'a> Fn(&'a Arc<E>, Arc<NodeResult>) -> NodeResult + Sync + Send>,
+        Arc<dyn for<'a> Fn(&'a Arc<E>, Arc<NodeResult>, Box<RawValue>) -> NodeResult + Sync + Send>,
     >,
 }
 
@@ -139,9 +144,13 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
 
     fn register(
         &mut self,
-        _node_name: &str,
-        _handle: &(dyn for<'a> Fn(&'a Arc<E>, Arc<NodeResult>) -> NodeResult + Sync + Send),
+        node_name: &str,
+        handle: Arc<
+            dyn for<'a> Fn(&'a Arc<E>, Arc<NodeResult>, Box<RawValue>) -> NodeResult + Sync + Send,
+        >,
     ) {
+        self.node_mapping
+            .insert(node_name.to_string(), Arc::clone(&handle));
     }
 
     fn registers(
@@ -220,7 +229,7 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
                 .collect();
 
             let arg_ptr = Arc::clone(&args);
-            let _params_ptr = node.node_config.params.clone();
+            let params_ptr = node.node_config.params.clone();
             let pre_fn = Arc::clone(&self.pre);
             let post_fn = Arc::clone(&self.post);
             let handle_fn = Arc::clone(self.node_mapping.get(&node.node_config.node).unwrap());
@@ -230,10 +239,10 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
                     results.push(item)
                 }
                 // let params = node_instance.deserialize(&params_ptr);
-                let prev_res = Arc::new(results.iter().fold(NodeResult::new(), |a, b| a.merge(b)));
+                let prev_res = Arc::new(results.iter().fold(NodeResult::new(), |a, b| a.merge(b))); //TODO: process
                 let pre_result: T = pre_fn(&arg_ptr, &prev_res);
                 let res = match timeout(Duration::from_secs(1), async {
-                    handle_fn(&arg_ptr, prev_res.clone())
+                    handle_fn(&arg_ptr, prev_res.clone(), params_ptr)
                 })
                 .await
                 {
@@ -263,5 +272,5 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
 }
 
 fn demo() {
-    let _dag = Flow::<i32, i32>::new().register("handle_wrapper", &handle_wrapper);
+    let _dag = Flow::<i32, i32>::new().register("handle_wrapper", Arc::new(handle_wrapper));
 }
