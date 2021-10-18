@@ -91,10 +91,11 @@ struct NodeConfig {
 }
 
 #[derive(Deserialize, Default, Debug, Clone)]
-struct DAGConfig {
+pub struct DAGConfig {
     nodes: Vec<NodeConfig>,
 }
 
+#[derive(Debug)]
 pub struct DAGNode {
     node_config: NodeConfig,
     prevs: HashSet<String>,
@@ -130,7 +131,7 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
 }
 
 impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
-    fn new() -> Flow<T, E> {
+    pub fn new() -> Flow<T, E> {
         Flow {
             nodes: HashMap::new(),
             timeout: Duration::from_secs(5),
@@ -142,7 +143,7 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
         }
     }
 
-    fn register(
+    pub fn register(
         &mut self,
         node_name: &str,
         handle: Arc<
@@ -153,7 +154,7 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
             .insert(node_name.to_string(), Arc::clone(&handle));
     }
 
-    fn registers(
+    pub fn registers(
         &mut self,
         _nodes: &[(
             &str,
@@ -162,7 +163,7 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
     ) {
     }
 
-    fn init(&mut self, conf_content: &str) -> Result<(), String> {
+    pub fn init(&mut self, conf_content: &str) -> Result<(), String> {
         let dag_config: DAGConfig = serde_json::from_str(conf_content).unwrap();
         for node_config in dag_config.nodes.iter() {
             self.nodes.insert(
@@ -198,10 +199,12 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
             }
         }
 
+        println!("data: {:?}", self.nodes);
+
         Ok(())
     }
 
-    async fn make_flow(&self, args: Arc<E>) -> Vec<NodeResult> {
+    pub async fn make_flow(&self, args: Arc<E>) -> Vec<NodeResult> {
         let leaf_nodes: HashSet<String> = self
             .nodes
             .values()
@@ -227,6 +230,7 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
                 .iter()
                 .map(|dep| dag_futures.get(dep).unwrap().clone())
                 .collect();
+            println!("node {:?} node_name: {:?}", node, node_name);
 
             let arg_ptr = Arc::clone(&args);
             let params_ptr = node.node_config.params.clone();

@@ -1,4 +1,4 @@
-mod dag;
+pub mod dag;
 fn main() {
     println!("Hello, world!");
 }
