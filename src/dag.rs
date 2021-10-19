@@ -10,6 +10,7 @@ use std::fmt::Debug;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
+use std::collections::VecDeque;
 
 #[derive(Clone, Debug)]
 pub enum NodeResult {
@@ -220,11 +221,24 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
                     println!("oihiohiohoiho {:?}", node_name.clone());
                     NodeResult::new()
                 };
-                (node_name.clone(), entry.boxed().shared())
+                (node_name.clone(), Box::new(entry.boxed().shared()))
             })
             .collect();
 
+        let bfs_queue: VecDeque<String> = self
+        .nodes
+        .values()
+        .filter(|node| node.prevs.is_empty())
+        .map(|node| node.node_config.name.clone())
+        .collect();
+        println!("bfs_queue {:?}", bfs_queue);
+
         for (node_name, node) in self.nodes.iter() {
+            println!("{:?} {:?}", node_name, self
+            .nodes
+            .get(node_name)
+            .unwrap()
+            .prevs);
             let mut deps: FuturesUnordered<_> = self
                 .nodes
                 .get(node_name)
@@ -240,7 +254,7 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
             let pre_fn = Arc::clone(&self.pre);
             let post_fn = Arc::clone(&self.post);
             let handle_fn = Arc::clone(self.node_mapping.get(&node.node_config.node).unwrap());
-            *dag_futures.get_mut(node_name).unwrap() = join_all(deps)
+            *dag_futures.get_mut(node_name).unwrap() = Box::new(join_all(deps)
                 .then(|results| async move {
                     // async move {
                     // let mut results = Vec::with_capacity(deps.len());
@@ -265,7 +279,7 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
                     res
                 })
                 .boxed()
-                .shared();
+                .shared());
         }
 
         // let mut leaves: FuturesUnordered<_> = leaf_nodes
