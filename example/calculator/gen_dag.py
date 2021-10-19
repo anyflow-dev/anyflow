@@ -38,7 +38,7 @@ def gen_dag(dag_size):
         "params": {
             "val": i
         },
-    } for i in range(1, dag_size + 1)]
+    } for i in range(1, dag_size)]
     return my_dag
 
 
