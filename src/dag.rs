@@ -1,16 +1,18 @@
 use futures::future::join_all;
 use futures::future::FutureExt;
+use futures::future::Shared;
 use futures::stream::FuturesUnordered;
 use futures::StreamExt;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::any::Any;
+use std::collections::VecDeque;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
-use std::collections::VecDeque;
 
 #[derive(Clone, Debug)]
 pub enum NodeResult {
@@ -225,20 +227,24 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
             })
             .collect();
 
+        // let mut have_handled = Box::new(HashSet::new());
+        // self.dfs_node(Arc::clone(&dag_futures), have_handled);
+
         let bfs_queue: VecDeque<String> = self
-        .nodes
-        .values()
-        .filter(|node| node.prevs.is_empty())
-        .map(|node| node.node_config.name.clone())
-        .collect();
+            .nodes
+            .values()
+            .filter(|node| node.prevs.is_empty())
+            .map(|node| node.node_config.name.clone())
+            .collect();
         println!("bfs_queue {:?}", bfs_queue);
 
+        // TODO: make it DFS
         for (node_name, node) in self.nodes.iter() {
-            println!("{:?} {:?}", node_name, self
-            .nodes
-            .get(node_name)
-            .unwrap()
-            .prevs);
+            println!(
+                "{:?} {:?}",
+                node_name,
+                self.nodes.get(node_name).unwrap().prevs
+            );
             let mut deps: FuturesUnordered<_> = self
                 .nodes
                 .get(node_name)
@@ -254,32 +260,34 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
             let pre_fn = Arc::clone(&self.pre);
             let post_fn = Arc::clone(&self.post);
             let handle_fn = Arc::clone(self.node_mapping.get(&node.node_config.node).unwrap());
-            *dag_futures.get_mut(node_name).unwrap() = Box::new(join_all(deps)
-                .then(|results| async move {
-                    // async move {
-                    // let mut results = Vec::with_capacity(deps.len());
-                    // while let Some(item) = deps.next().await {
-                    //     println!("xxxx {:?}", item);
-                    //     results.push(item)
-                    // }
-                    // println!("results {:?} {:?}", results.len(), deps.len());
-                    // let params = node_instance.deserialize(&params_ptr);
-                    let prev_res =
-                        Arc::new(results.iter().fold(NodeResult::new(), |a, b| a.merge(b))); //TODO: process
-                    let pre_result: T = pre_fn(&arg_ptr, &prev_res);
-                    let res = match timeout(Duration::from_secs(1), async {
-                        handle_fn(&arg_ptr, prev_res.clone(), params_ptr)
+            *dag_futures.get_mut(node_name).unwrap() = Box::new(
+                join_all(deps)
+                    .then(|results| async move {
+                        // async move {
+                        // let mut results = Vec::with_capacity(deps.len());
+                        // while let Some(item) = deps.next().await {
+                        //     println!("xxxx {:?}", item);
+                        //     results.push(item)
+                        // }
+                        // println!("results {:?} {:?}", results.len(), deps.len());
+                        // let params = node_instance.deserialize(&params_ptr);
+                        let prev_res =
+                            Arc::new(results.iter().fold(NodeResult::new(), |a, b| a.merge(b))); //TODO: process
+                        let pre_result: T = pre_fn(&arg_ptr, &prev_res);
+                        let res = match timeout(Duration::from_secs(1), async {
+                            handle_fn(&arg_ptr, prev_res.clone(), params_ptr)
+                        })
+                        .await
+                        {
+                            Err(_) => NodeResult::Err("timeout"),
+                            Ok(val) => val,
+                        };
+                        post_fn(&arg_ptr, &prev_res, &pre_result);
+                        res
                     })
-                    .await
-                    {
-                        Err(_) => NodeResult::Err("timeout"),
-                        Ok(val) => val,
-                    };
-                    post_fn(&arg_ptr, &prev_res, &pre_result);
-                    res
-                })
-                .boxed()
-                .shared());
+                    .boxed()
+                    .shared(),
+            );
         }
 
         // let mut leaves: FuturesUnordered<_> = leaf_nodes
@@ -302,4 +310,39 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
 
 fn demo() {
     let _dag = Flow::<i32, i32>::new().register("handle_wrapper", Arc::new(handle_wrapper));
+}
+
+async fn dfs_node<'a>(
+    dag_futures: Arc<
+        HashMap<
+            std::string::String,
+            Box<Shared<Pin<Box<dyn futures::Future<Output = NodeResult> + std::marker::Send>>>>,
+        >,
+    >,
+    have_handled: Arc<HashSet<bool>>,
+    nodes: &HashMap<String, Box<DAGNode>>,
+    node: String,
+) -> bool {
+    if nodes.get(&node).unwrap().prevs.is_empty() {
+        return true;
+    }
+    let deps = nodes
+        .get(&node)
+        .unwrap()
+        .prevs
+        .iter()
+        .map(|n| {
+            dfs_node(
+                Arc::clone(&dag_futures),
+                Arc::clone(&have_handled),
+                nodes,
+                n.to_string(),
+            )
+            .boxed()
+            .shared()
+        })
+        .collect::<Vec<_>>();
+
+    join_all(deps).then(|x| async move { true }).await;
+    return true;
 }
