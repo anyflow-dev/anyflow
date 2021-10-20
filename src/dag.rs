@@ -312,6 +312,12 @@ fn demo() {
     let _dag = Flow::<i32, i32>::new().register("handle_wrapper", Arc::new(handle_wrapper));
 }
 
+#[derive(Default, Clone, Debug)]
+struct A {}
+
+unsafe impl Send for A {}
+unsafe impl Sync for A {}
+
 async fn dfs_node<'a>(
     dag_futures: Arc<
         HashMap<
@@ -322,27 +328,28 @@ async fn dfs_node<'a>(
     have_handled: Arc<HashSet<bool>>,
     nodes: &HashMap<String, Box<DAGNode>>,
     node: String,
-) -> bool {
+) -> A {
     if nodes.get(&node).unwrap().prevs.is_empty() {
-        return true;
+        return A::default();
     }
-    let deps = nodes
-        .get(&node)
-        .unwrap()
-        .prevs
-        .iter()
-        .map(|n| {
+    let mut deps = Vec::new();
+
+    for prev in nodes.get(&node).unwrap().prevs.iter() {
+        deps.push(
             dfs_node(
                 Arc::clone(&dag_futures),
                 Arc::clone(&have_handled),
                 nodes,
-                n.to_string(),
+                prev.to_string(),
             )
             .boxed()
-            .shared()
-        })
-        .collect::<Vec<_>>();
+            .shared(),
+            // async {
+            //     A::default()
+            // }.boxed().shared()
+        );
+    }
 
-    join_all(deps).then(|x| async move { true }).await;
-    return true;
+    join_all(deps).then(|x| async move { A::default() }).await;
+    return A::default();
 }
