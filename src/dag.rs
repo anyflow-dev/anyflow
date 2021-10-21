@@ -253,20 +253,25 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
         //         })
         //         .collect(),
         // );
-        let mut dag_futures_ptr = Arc::new(HashMap::new());
+        let mut dag_futures_ptr: Arc<
+            HashMap<
+                std::string::String,
+                Shared<Pin<Box<dyn futures::Future<Output = NodeResult> + std::marker::Send>>>,
+            >,
+        > = Arc::new(HashMap::new());
         for leaf in leaf_nodes.iter() {
             let dag_futures_ptr_copy = Arc::clone(&dag_futures_ptr);
-            Arc::get_mut(&mut dag_futures_ptr).unwrap().insert(
-                leaf.to_string(),
-                dfs_node(
-                    dag_futures_ptr_copy,
-                    Arc::clone(&have_handled),
-                    Arc::clone(&nodes_ptr),
-                    leaf.clone(),
-                )
-                .boxed()
-                .shared(),
-            );
+            // *dag_futures_ptr.insert(
+            //     leaf.to_string(),
+            //     dfs_node(
+            //         dag_futures_ptr_copy,
+            //         Arc::clone(&have_handled),
+            //         Arc::clone(&nodes_ptr),
+            //         leaf.clone(),
+            //     )
+            //     .boxed()
+            //     .shared(),
+            // );
         }
 
         // TODO: make it DFS
@@ -284,7 +289,7 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
                 .iter()
                 .map(|dep| dag_futures.get(dep).unwrap().clone())
                 .collect();
-            println!("node {:?} node_name: {:?}", node_name, deps.len());
+            // println!("node {:?} node_name: {:?}", node_name, deps.len());
 
             let arg_ptr = Arc::clone(&args);
             let params_ptr = node.node_config.params.clone();
@@ -361,6 +366,7 @@ async fn dfs_node<'a>(
     nodes: Arc<HashMap<String, Box<DAGNode>>>,
     node: String,
 ) -> NodeResult {
+    println!("xxx {:?}", node);
     if nodes.get(&node).unwrap().prevs.is_empty() {
         return NodeResult::new();
     }
