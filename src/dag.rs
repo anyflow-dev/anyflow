@@ -99,7 +99,7 @@ pub struct DAGConfig {
     nodes: Vec<NodeConfig>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct DAGNode {
     node_config: NodeConfig,
     prevs: HashSet<String>,
@@ -228,16 +228,46 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
             })
             .collect();
 
-        // let mut have_handled = Box::new(HashSet::new());
-        // self.dfs_node(Arc::clone(&dag_futures), have_handled);
+        let mut have_handled: Arc<HashSet<String>> = Arc::new(HashSet::new());
 
-        let bfs_queue: VecDeque<String> = self
-            .nodes
-            .values()
-            .filter(|node| node.prevs.is_empty())
-            .map(|node| node.node_config.name.clone())
-            .collect();
-        println!("bfs_queue {:?}", bfs_queue);
+        let mut nodes_ptr: Arc<HashMap<String, Box<DAGNode>>> = Arc::new(
+            self.nodes
+                .iter()
+                .map(|(k, v)| (k.clone(), Box::new(*v.clone())))
+                .collect(),
+        );
+        let n: Arc<Vec<Box<String>>> = Arc::new(
+            self.nodes
+                .iter()
+                .map(|(key, val)| Box::new(key.clone()))
+                .collect(),
+        );
+        // let mut dag_futures_ptr: Arc<HashMap<_, _>> = Arc::new(
+        //     n.iter()
+        //         .map(|node_name| {
+        //             let entry = async move {
+        //                 println!("oihiohiohoiho {:?}", *node_name.clone());
+        //                 NodeResult::new()
+        //             };
+        //             (*node_name.clone(), entry.boxed().shared())
+        //         })
+        //         .collect(),
+        // );
+        let mut dag_futures_ptr = Arc::new(HashMap::new());
+        for leaf in leaf_nodes.iter() {
+            let dag_futures_ptr_copy = Arc::clone(&dag_futures_ptr);
+            Arc::get_mut(&mut dag_futures_ptr).unwrap().insert(
+                leaf.to_string(),
+                dfs_node(
+                    dag_futures_ptr_copy,
+                    Arc::clone(&have_handled),
+                    Arc::clone(&nodes_ptr),
+                    leaf.clone(),
+                )
+                .boxed()
+                .shared(),
+            );
+        }
 
         // TODO: make it DFS
         for (node_name, node) in self.nodes.iter() {
@@ -301,7 +331,7 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
         // }
         let mut leaves = Vec::new();
         for leaf in leaf_nodes {
-            leaves.push(dag_futures.get(&leaf).unwrap().clone());
+            leaves.push(dag_futures_ptr.get(&leaf).unwrap().clone());
             println!("leave {:?}", leaf);
         }
         let results = join_all(leaves).await;
@@ -324,15 +354,15 @@ async fn dfs_node<'a>(
     mut dag_futures: Arc<
         HashMap<
             std::string::String,
-            Shared<Pin<Box<dyn futures::Future<Output = A> + std::marker::Send>>>,
+            Shared<Pin<Box<dyn futures::Future<Output = NodeResult> + std::marker::Send>>>,
         >,
     >,
-    mut have_handled: Arc<HashSet<bool>>,
+    mut have_handled: Arc<HashSet<String>>,
     nodes: Arc<HashMap<String, Box<DAGNode>>>,
     node: String,
-) -> A {
+) -> NodeResult {
     if nodes.get(&node).unwrap().prevs.is_empty() {
-        return A::default();
+        return NodeResult::new();
     }
     let mut deps = Vec::new();
     for prev in nodes.get(&node).unwrap().prevs.iter() {
@@ -341,7 +371,7 @@ async fn dfs_node<'a>(
         let have_handled_ptr = Arc::clone(&have_handled);
         let nodes_ptr = Arc::clone(&nodes);
 
-        if !dag_futures.contains_key(&prev.to_string()) {
+        if !have_handled.contains(&prev.to_string()) {
             Arc::get_mut(&mut dag_futures).unwrap().insert(
                 prev.to_string(),
                 dfs_node(
@@ -353,10 +383,15 @@ async fn dfs_node<'a>(
                 .boxed()
                 .shared(),
             );
+            Arc::get_mut(&mut have_handled)
+                .unwrap()
+                .insert(prev_ptr.to_string());
         }
         deps.push(dag_futures.get(prev).unwrap().clone());
     }
 
-    join_all(deps).then(|x| async move { A::default() }).boxed();
-    return A::default();
+    join_all(deps)
+        .then(|x| async move { NodeResult::new() })
+        .await
+    // return A::default();
 }
