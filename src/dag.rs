@@ -1,3 +1,4 @@
+use async_recursion::async_recursion;
 use futures::future::join_all;
 use futures::future::FutureExt;
 use futures::future::Shared;
@@ -318,38 +319,44 @@ struct A {}
 unsafe impl Send for A {}
 unsafe impl Sync for A {}
 
+#[async_recursion]
 async fn dfs_node<'a>(
-    dag_futures: Arc<
+    mut dag_futures: Arc<
         HashMap<
             std::string::String,
-            Box<Shared<Pin<Box<dyn futures::Future<Output = NodeResult> + std::marker::Send>>>>,
+            Shared<Pin<Box<dyn futures::Future<Output = A> + std::marker::Send>>>,
         >,
     >,
-    have_handled: Arc<HashSet<bool>>,
-    nodes: &HashMap<String, Box<DAGNode>>,
+    mut have_handled: Arc<HashSet<bool>>,
+    nodes: Arc<HashMap<String, Box<DAGNode>>>,
     node: String,
 ) -> A {
     if nodes.get(&node).unwrap().prevs.is_empty() {
         return A::default();
     }
     let mut deps = Vec::new();
-
     for prev in nodes.get(&node).unwrap().prevs.iter() {
-        deps.push(
-            dfs_node(
-                Arc::clone(&dag_futures),
-                Arc::clone(&have_handled),
-                nodes,
+        let prev_ptr = Arc::new(prev);
+        let dag_futures_ptr = Arc::clone(&dag_futures);
+        let have_handled_ptr = Arc::clone(&have_handled);
+        let nodes_ptr = Arc::clone(&nodes);
+
+        if !dag_futures.contains_key(&prev.to_string()) {
+            Arc::get_mut(&mut dag_futures).unwrap().insert(
                 prev.to_string(),
-            )
-            .boxed()
-            .shared(),
-            // async {
-            //     A::default()
-            // }.boxed().shared()
-        );
+                dfs_node(
+                    dag_futures_ptr,
+                    have_handled_ptr,
+                    nodes_ptr,
+                    prev_ptr.to_string(),
+                )
+                .boxed()
+                .shared(),
+            );
+        }
+        deps.push(dag_futures.get(prev).unwrap().clone());
     }
 
-    join_all(deps).then(|x| async move { A::default() }).await;
+    join_all(deps).then(|x| async move { A::default() }).boxed();
     return A::default();
 }
