@@ -136,6 +136,22 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
     >,
 }
 
+// impl<T: Default + Sync + Send, E: Send + Sync> Clone for Flow<T, E> {
+//     fn clone(&self) -> Flow<T, E> {
+//         Flow {
+//             nodes: Arc::clone(&self.nodes),
+//             timeout: Duration::from_secs(5),
+//             pre: Arc::clone(&self.pre),
+//             post: Arc::clone(&self.post),
+//             timeout_cb: Arc::clone(&self.timeout_cb),
+//             failure_cb: Arc::clone(&self.failure_cb),
+//             node_mapping: Arc::clone(&self.node_mapping),
+//         }
+//     }
+// }
+
+// impl<T: Default + Sync + Send, E: Send + Sync> Copy for Flow<T, E> {}
+
 impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
     pub fn new() -> Flow<T, E> {
         Flow {
@@ -218,17 +234,19 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
             .map(|node| node.node_config.name.clone())
             .collect();
 
-        let mut dag_futures: HashMap<_, _> = self
-            .nodes
-            .iter()
-            .map(|(node_name, _)| {
-                let entry = async move {
-                    println!("oihiohiohoiho {:?}", node_name.clone());
-                    NodeResult::new()
-                };
-                (node_name.clone(), Box::new(entry.boxed().shared()))
-            })
-            .collect();
+        // let mut dag_futures: HashMap<_, _> = self
+        //     .nodes
+        //     .lock()
+        //     .unwrap()
+        //     .iter()
+        //     .map(|(node_name, _)| {
+        //         let entry = async move {
+        //             println!("oihiohiohoiho {:?}", node_name.clone());
+        //             NodeResult::new()
+        //         };
+        //         (node_name.clone(), Box::new(entry.boxed().shared()))
+        //     })
+        //     .collect();
 
         let mut have_handled: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
 
@@ -244,7 +262,7 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
                 .map(|(key, val)| Box::new(key.clone()))
                 .collect(),
         );
-        // let mut dag_futures_ptr: Arc<HashMap<_, _>> = Arc::new(
+        // let mut dag_futures_ptr: Arc<Mutex<HashMap<_, _>>> = Arc::new(Mutex::new(
         //     n.iter()
         //         .map(|node_name| {
         //             let entry = async move {
@@ -254,7 +272,7 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
         //             (*node_name.clone(), entry.boxed().shared())
         //         })
         //         .collect(),
-        // );
+        // ));
         let mut dag_futures_ptr: Arc<
             Mutex<
                 HashMap<
@@ -272,7 +290,7 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
             dag_futures_ptr.lock().unwrap().insert(
                 leaf.to_string(),
                 // entry.boxed().shared()
-                dfs_node(
+                Flow::<T, E>::dfs_node(
                     dag_futures_ptr_copy,
                     Arc::clone(&have_handled),
                     Arc::clone(&nodes_ptr),
@@ -284,56 +302,64 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
         }
 
         // TODO: make it DFS
-        for (node_name, node) in self.nodes.iter() {
-            println!(
-                "{:?} {:?}",
-                node_name,
-                self.nodes.get(node_name).unwrap().prevs
-            );
-            let mut deps: FuturesUnordered<_> = self
-                .nodes
-                .get(node_name)
-                .unwrap()
-                .prevs
-                .iter()
-                .map(|dep| dag_futures.get(dep).unwrap().clone())
-                .collect();
-            // println!("node {:?} node_name: {:?}", node_name, deps.len());
+        // for (node_name, node) in self.nodes.lock().unwrap().iter() {
+        //     println!(
+        //         "{:?} {:?}",
+        //         node_name,
+        //         self.nodes.lock().unwrap().get(node_name).unwrap().prevs
+        //     );
+        //     let mut deps: FuturesUnordered<_> = self
+        //         .nodes
+        //         .lock()
+        //         .unwrap()
+        //         .get(node_name)
+        //         .unwrap()
+        //         .prevs
+        //         .iter()
+        //         .map(|dep| dag_futures.get(dep).unwrap().clone())
+        //         .collect();
+        //     // println!("node {:?} node_name: {:?}", node_name, deps.len());
 
-            let arg_ptr = Arc::clone(&args);
-            let params_ptr = node.node_config.params.clone();
-            let pre_fn = Arc::clone(&self.pre);
-            let post_fn = Arc::clone(&self.post);
-            let handle_fn = Arc::clone(self.node_mapping.get(&node.node_config.node).unwrap());
-            *dag_futures.get_mut(node_name).unwrap() = Box::new(
-                join_all(deps)
-                    .then(|results| async move {
-                        // async move {
-                        // let mut results = Vec::with_capacity(deps.len());
-                        // while let Some(item) = deps.next().await {
-                        //     println!("xxxx {:?}", item);
-                        //     results.push(item)
-                        // }
-                        // println!("results {:?} {:?}", results.len(), deps.len());
-                        // let params = node_instance.deserialize(&params_ptr);
-                        let prev_res =
-                            Arc::new(results.iter().fold(NodeResult::new(), |a, b| a.merge(b))); //TODO: process
-                        let pre_result: T = pre_fn(&arg_ptr, &prev_res);
-                        let res = match timeout(Duration::from_secs(1), async {
-                            handle_fn(&arg_ptr, prev_res.clone(), params_ptr)
-                        })
-                        .await
-                        {
-                            Err(_) => NodeResult::Err("timeout"),
-                            Ok(val) => val,
-                        };
-                        post_fn(&arg_ptr, &prev_res, &pre_result);
-                        res
-                    })
-                    .boxed()
-                    .shared(),
-            );
-        }
+        //     let arg_ptr = Arc::clone(&args);
+        //     let params_ptr = node.node_config.params.clone();
+        //     let pre_fn = Arc::clone(&self.pre);
+        //     let post_fn = Arc::clone(&self.post);
+        //     let handle_fn = Arc::clone(
+        //         self.node_mapping
+        //             .lock()
+        //             .unwrap()
+        //             .get(&node.node_config.node)
+        //             .unwrap(),
+        //     );
+        //     *dag_futures.get_mut(node_name).unwrap() = Box::new(
+        //         join_all(deps)
+        //             .then(|results| async move {
+        //                 // async move {
+        //                 // let mut results = Vec::with_capacity(deps.len());
+        //                 // while let Some(item) = deps.next().await {
+        //                 //     println!("xxxx {:?}", item);
+        //                 //     results.push(item)
+        //                 // }
+        //                 // println!("results {:?} {:?}", results.len(), deps.len());
+        //                 // let params = node_instance.deserialize(&params_ptr);
+        //                 let prev_res =
+        //                     Arc::new(results.iter().fold(NodeResult::new(), |a, b| a.merge(b))); //TODO: process
+        //                 let pre_result: T = pre_fn(&arg_ptr, &prev_res);
+        //                 let res = match timeout(Duration::from_secs(1), async {
+        //                     handle_fn(&arg_ptr, prev_res.clone(), params_ptr)
+        //                 })
+        //                 .await
+        //                 {
+        //                     Err(_) => NodeResult::Err("timeout"),
+        //                     Ok(val) => val,
+        //                 };
+        //                 post_fn(&arg_ptr, &prev_res, &pre_result);
+        //                 res
+        //             })
+        //             .boxed()
+        //             .shared(),
+        //     );
+        // }
 
         // let mut leaves: FuturesUnordered<_> = leaf_nodes
         //     .iter()
@@ -350,6 +376,54 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
         }
         let results = join_all(leaves).await;
         results
+    }
+
+    #[async_recursion]
+    async fn dfs_node<'a>(
+        mut dag_futures: Arc<
+            Mutex<
+                HashMap<
+                    std::string::String,
+                    Shared<Pin<Box<dyn futures::Future<Output = NodeResult> + std::marker::Send>>>,
+                >,
+            >,
+        >,
+        mut have_handled: Arc<Mutex<HashSet<String>>>,
+        nodes: Arc<HashMap<String, Box<DAGNode>>>,
+        node: String,
+    ) -> NodeResult {
+        println!("xxx {:?}", node);
+        if nodes.get(&node).unwrap().prevs.is_empty() {
+            return NodeResult::new();
+        }
+        let mut deps = Vec::new();
+        for prev in nodes.get(&node).unwrap().prevs.iter() {
+            let prev_ptr = Arc::new(prev);
+            let dag_futures_ptr = Arc::clone(&dag_futures);
+            let have_handled_ptr = Arc::clone(&have_handled);
+            let nodes_ptr = Arc::clone(&nodes);
+
+            if !have_handled.lock().unwrap().contains(&prev.to_string()) {
+                dag_futures.lock().unwrap().insert(
+                    prev.to_string(),
+                    dfs_node(
+                        dag_futures_ptr,
+                        have_handled_ptr,
+                        nodes_ptr,
+                        prev_ptr.to_string(),
+                    )
+                    .boxed()
+                    .shared(),
+                );
+                have_handled.lock().unwrap().insert(prev_ptr.to_string());
+            }
+            deps.push(dag_futures.lock().unwrap().get(prev).unwrap().clone());
+        }
+
+        join_all(deps)
+            .then(|x| async move { NodeResult::new() })
+            .await
+        // return A::default();
     }
 }
 
