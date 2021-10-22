@@ -10,12 +10,12 @@ use std::any::Any;
 use std::collections::VecDeque;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
-use std::sync::Arc;
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::time::timeout;
-use std::ops::{Deref, DerefMut};
-use std::rc::Rc;
 
 #[derive(Clone, Debug)]
 pub enum NodeResult {
@@ -230,7 +230,7 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
             })
             .collect();
 
-        let mut have_handled: Arc<HashSet<String>> = Arc::new(HashSet::new());
+        let mut have_handled: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
 
         let mut nodes_ptr: Arc<HashMap<String, Box<DAGNode>>> = Arc::new(
             self.nodes
@@ -256,26 +256,30 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
         //         .collect(),
         // );
         let mut dag_futures_ptr: Arc<
-            HashMap<
-                std::string::String,
-                Shared<Pin<Box<dyn futures::Future<Output = NodeResult> + std::marker::Send>>>,
+            Mutex<
+                HashMap<
+                    std::string::String,
+                    Shared<Pin<Box<dyn futures::Future<Output = NodeResult> + std::marker::Send>>>,
+                >,
             >,
-        > = Arc::new(HashMap::new());
+        > = Arc::new(Mutex::new(HashMap::new()));
         for leaf in leaf_nodes.iter() {
-            let dag_futures_ptr_copy = Arc::clone(&dag_futures_ptr);  
+            let dag_futures_ptr_copy = Arc::clone(&dag_futures_ptr);
             // let entry = async move {
             //     println!("oihiohiohoiho {:?}", leaf.clone());
             //     NodeResult::new()
-            // };           
-            (*dag_futures_ptr).insert(
+            // };
+            dag_futures_ptr.lock().unwrap().insert(
                 leaf.to_string(),
                 // entry.boxed().shared()
                 dfs_node(
                     dag_futures_ptr_copy,
                     Arc::clone(&have_handled),
                     Arc::clone(&nodes_ptr),
-                    leaf.clone()
-                ).boxed().shared()
+                    leaf.clone(),
+                )
+                .boxed()
+                .shared(),
             );
         }
 
@@ -341,7 +345,7 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
         // }
         let mut leaves = Vec::new();
         for leaf in leaf_nodes {
-            leaves.push(dag_futures_ptr.get(&leaf).unwrap().clone());
+            leaves.push(dag_futures_ptr.lock().unwrap().get(&leaf).unwrap().clone());
             println!("leave {:?}", leaf);
         }
         let results = join_all(leaves).await;
@@ -362,12 +366,14 @@ unsafe impl Sync for A {}
 #[async_recursion]
 async fn dfs_node<'a>(
     mut dag_futures: Arc<
-        HashMap<
-            std::string::String,
-            Shared<Pin<Box<dyn futures::Future<Output = NodeResult> + std::marker::Send>>>,
+        Mutex<
+            HashMap<
+                std::string::String,
+                Shared<Pin<Box<dyn futures::Future<Output = NodeResult> + std::marker::Send>>>,
+            >,
         >,
     >,
-    mut have_handled: Arc<HashSet<String>>,
+    mut have_handled: Arc<Mutex<HashSet<String>>>,
     nodes: Arc<HashMap<String, Box<DAGNode>>>,
     node: String,
 ) -> NodeResult {
@@ -382,8 +388,8 @@ async fn dfs_node<'a>(
         let have_handled_ptr = Arc::clone(&have_handled);
         let nodes_ptr = Arc::clone(&nodes);
 
-        if !have_handled.contains(&prev.to_string()) {
-            Arc::get_mut(&mut dag_futures).unwrap().insert(
+        if !have_handled.lock().unwrap().contains(&prev.to_string()) {
+            dag_futures.lock().unwrap().insert(
                 prev.to_string(),
                 dfs_node(
                     dag_futures_ptr,
@@ -394,11 +400,9 @@ async fn dfs_node<'a>(
                 .boxed()
                 .shared(),
             );
-            Arc::get_mut(&mut have_handled)
-                .unwrap()
-                .insert(prev_ptr.to_string());
+            have_handled.lock().unwrap().insert(prev_ptr.to_string());
         }
-        deps.push(dag_futures.get(prev).unwrap().clone());
+        deps.push(dag_futures.lock().unwrap().get(prev).unwrap().clone());
     }
 
     join_all(deps)
