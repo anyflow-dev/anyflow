@@ -285,7 +285,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                     Arc::new(
                         self.node_mapping
                             .iter()
-                            .map(|(key, val)| (key.clone(), Arc::clone(&val)))
+                            .map(|(key, val)| (key.clone(), Arc::clone(val)))
                             .collect(),
                     ),
                     Arc::clone(&args),
