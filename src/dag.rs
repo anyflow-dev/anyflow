@@ -2,20 +2,19 @@ use async_recursion::async_recursion;
 use futures::future::join_all;
 use futures::future::FutureExt;
 use futures::future::Shared;
-use futures::stream::FuturesUnordered;
+
 use futures::StreamExt;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::any::Any;
-use std::collections::VecDeque;
+
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-use std::ops::{Deref, DerefMut};
+
 use std::pin::Pin;
-use std::rc::Rc;
+
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use tokio::time::timeout;
 
 #[derive(Clone, Debug)]
 pub enum NodeResult {
@@ -226,7 +225,7 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
         Ok(())
     }
 
-    pub async fn make_flow(&self, args: Arc<E>) -> Vec<NodeResult> {
+    pub async fn make_flow(&self, _args: Arc<E>) -> Vec<NodeResult> {
         let leaf_nodes: HashSet<String> = self
             .nodes
             .values()
@@ -248,18 +247,18 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
         //     })
         //     .collect();
 
-        let mut have_handled: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
+        let have_handled: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
 
-        let mut nodes_ptr: Arc<HashMap<String, Box<DAGNode>>> = Arc::new(
+        let nodes_ptr: Arc<HashMap<String, Box<DAGNode>>> = Arc::new(
             self.nodes
                 .iter()
                 .map(|(k, v)| (k.clone(), Box::new(*v.clone())))
                 .collect(),
         );
-        let n: Arc<Vec<Box<String>>> = Arc::new(
+        let _n: Arc<Vec<Box<String>>> = Arc::new(
             self.nodes
                 .iter()
-                .map(|(key, val)| Box::new(key.clone()))
+                .map(|(key, _val)| Box::new(key.clone()))
                 .collect(),
         );
         // let mut dag_futures_ptr: Arc<Mutex<HashMap<_, _>>> = Arc::new(Mutex::new(
@@ -273,7 +272,7 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
         //         })
         //         .collect(),
         // ));
-        let mut dag_futures_ptr: Arc<
+        let dag_futures_ptr: Arc<
             Mutex<
                 HashMap<
                     std::string::String,
@@ -380,7 +379,7 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
 
     #[async_recursion]
     async fn dfs_node<'a>(
-        mut dag_futures: Arc<
+        dag_futures: Arc<
             Mutex<
                 HashMap<
                     std::string::String,
@@ -388,7 +387,7 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
                 >,
             >,
         >,
-        mut have_handled: Arc<Mutex<HashSet<String>>>,
+        have_handled: Arc<Mutex<HashSet<String>>>,
         nodes: Arc<HashMap<String, Box<DAGNode>>>,
         node: String,
     ) -> NodeResult {
@@ -421,7 +420,7 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
         }
 
         join_all(deps)
-            .then(|x| async move { NodeResult::new() })
+            .then(|_x| async move { NodeResult::new() })
             .await
         // return A::default();
     }
@@ -439,7 +438,7 @@ unsafe impl Sync for A {}
 
 #[async_recursion]
 async fn dfs_node<'a>(
-    mut dag_futures: Arc<
+    dag_futures: Arc<
         Mutex<
             HashMap<
                 std::string::String,
@@ -447,7 +446,7 @@ async fn dfs_node<'a>(
             >,
         >,
     >,
-    mut have_handled: Arc<Mutex<HashSet<String>>>,
+    have_handled: Arc<Mutex<HashSet<String>>>,
     nodes: Arc<HashMap<String, Box<DAGNode>>>,
     node: String,
 ) -> NodeResult {
@@ -480,7 +479,7 @@ async fn dfs_node<'a>(
     }
 
     join_all(deps)
-        .then(|x| async move { NodeResult::new() })
+        .then(|_x| async move { NodeResult::new() })
         .await
     // return A::default();
 }
