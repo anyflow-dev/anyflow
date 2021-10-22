@@ -25,7 +25,7 @@ fn calc<'a, E: Send + Sync>(
         Some(val) => val,
         None => 0,
     };
-    println!("params {:?} {:?}", p, val);
+    // println!("params {:?} {:?}", p, val);
     anyflow::dag::NodeResult::new().set("res", &(val + p.val))
 }
 
@@ -37,15 +37,15 @@ async fn main() {
     let data = fs::read_to_string("dag.json").expect("Unable to read file");
     println!("{:?}", dag.init(&data));
     dag.register("calc", Arc::new(calc));
-    for i in 0..1000 {
+    for i in 0..100000000 {
         let my_dag = dag.make_flow(Arc::new(1));
-        println!("{:?}", my_dag.await[0].get::<i32>("res"));
+        // println!("{:?}", my_dag.await[0].get::<i32>("res"));
     }
 
     if let Ok(report) = guard.report().build() {
         let file = File::create("flamegraph.svg").unwrap();
         let mut options = pprof::flamegraph::Options::default();
-        options.image_width = Some(2500);
+        options.image_width = Some(1800);
         report.flamegraph_with_options(file, &mut options).unwrap();
     };
 }

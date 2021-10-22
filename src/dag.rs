@@ -339,7 +339,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         >,
         args: Arc<E>,
     ) -> NodeResult {
-        println!("xxx {:?}", node);
+        // println!("xxx {:?}", node);
         let mut deps = futures::stream::FuturesUnordered::new();
         if nodes.get(&node).unwrap().prevs.is_empty() {
             deps.push(async { NodeResult::new() }.boxed().shared());
