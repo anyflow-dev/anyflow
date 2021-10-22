@@ -45,3 +45,8 @@ example/calculator/**/*.rs.bk
 # Added by cargo
 
 example/calculator/target
+
+.DS_Store
+example/*/.DS_Store
+macros/.DS_Store
+flamegraph.svg
