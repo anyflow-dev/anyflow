@@ -295,12 +295,16 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             );
         }
 
-        let mut leaves = Vec::new();
-        for leaf in leaf_nodes {
-            leaves.push(dag_futures_ptr.lock().unwrap().get(&leaf).unwrap().clone());
-            println!("leave {:?}", leaf);
+        let mut leaves: futures::stream::FuturesUnordered<_> = leaf_nodes
+            .iter()
+            .map(|leaf| dag_futures_ptr.lock().unwrap().get(&*leaf).unwrap().clone())
+            .collect();
+
+        let mut results = Vec::new();
+
+        while let Some(item) = leaves.next().await {
+            results.push(item);
         }
-        let results = join_all(leaves).await;
         results
     }
 
@@ -336,43 +340,44 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         args: Arc<E>,
     ) -> NodeResult {
         println!("xxx {:?}", node);
+        let mut deps = futures::stream::FuturesUnordered::new();
         if nodes.get(&node).unwrap().prevs.is_empty() {
-            return NodeResult::new();
-        }
-        let mut deps = Vec::new();
-        for prev in nodes.get(&node).unwrap().prevs.iter() {
-            let prev_ptr = Arc::new(prev);
-            let dag_futures_ptr = Arc::clone(&dag_futures);
-            let have_handled_ptr = Arc::clone(&have_handled);
-            let nodes_ptr = Arc::clone(&nodes);
-            let pre_ptr = Arc::clone(&pre);
-            let post_ptr = Arc::clone(&post);
-            let timeout_cb_ptr = Arc::clone(&timeout_cb);
-            let failure_cb_ptr = Arc::clone(&failure_cb);
-            let node_mapping_ptr = Arc::clone(&node_mapping);
-            let arg_ptr = Arc::clone(&args);
+            deps.push(async { NodeResult::new() }.boxed().shared());
+        } else {
+            for prev in nodes.get(&node).unwrap().prevs.iter() {
+                let prev_ptr = Arc::new(prev);
+                let dag_futures_ptr = Arc::clone(&dag_futures);
+                let have_handled_ptr = Arc::clone(&have_handled);
+                let nodes_ptr = Arc::clone(&nodes);
+                let pre_ptr = Arc::clone(&pre);
+                let post_ptr = Arc::clone(&post);
+                let timeout_cb_ptr = Arc::clone(&timeout_cb);
+                let failure_cb_ptr = Arc::clone(&failure_cb);
+                let node_mapping_ptr = Arc::clone(&node_mapping);
+                let arg_ptr = Arc::clone(&args);
 
-            if !have_handled.lock().unwrap().contains(&prev.to_string()) {
-                dag_futures.lock().unwrap().insert(
-                    prev.to_string(),
-                    Flow::<T, E>::dfs_node(
-                        dag_futures_ptr,
-                        have_handled_ptr,
-                        nodes_ptr,
-                        prev_ptr.to_string(),
-                        pre_ptr,
-                        post_ptr,
-                        timeout_cb_ptr,
-                        failure_cb_ptr,
-                        node_mapping_ptr,
-                        arg_ptr,
-                    )
-                    .boxed()
-                    .shared(),
-                );
-                have_handled.lock().unwrap().insert(prev_ptr.to_string());
+                if !have_handled.lock().unwrap().contains(&prev.to_string()) {
+                    dag_futures.lock().unwrap().insert(
+                        prev.to_string(),
+                        Flow::<T, E>::dfs_node(
+                            dag_futures_ptr,
+                            have_handled_ptr,
+                            nodes_ptr,
+                            prev_ptr.to_string(),
+                            pre_ptr,
+                            post_ptr,
+                            timeout_cb_ptr,
+                            failure_cb_ptr,
+                            node_mapping_ptr,
+                            arg_ptr,
+                        )
+                        .boxed()
+                        .shared(),
+                    );
+                    have_handled.lock().unwrap().insert(prev_ptr.to_string());
+                }
+                deps.push(dag_futures.lock().unwrap().get(prev).unwrap().clone());
             }
-            deps.push(dag_futures.lock().unwrap().get(prev).unwrap().clone());
         }
 
         let params_ptr = nodes.get(&node).unwrap().node_config.params.clone();
@@ -382,22 +387,24 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                 .unwrap(),
         );
         let arg_ptr = Arc::clone(&args);
-        join_all(deps)
-            .then(|results| async move {
-                let prev_res = Arc::new(results.iter().fold(NodeResult::new(), |a, b| a.merge(b))); //TODO: process
-                                                                                                    // let pre_result: T = pre(&arg_ptr, &prev_res);
-                let res = match timeout(Duration::from_secs(1), async {
-                    handle_fn(&arg_ptr, prev_res.clone(), params_ptr)
-                })
-                .await
-                {
-                    Err(_) => NodeResult::Err("timeout"),
-                    Ok(val) => val,
-                };
-                // post_fn(&arg_ptr, &prev_res, &pre_result);
-                res
-            })
-            .await
+
+        let mut results = Vec::with_capacity(deps.len());
+        while let Some(item) = deps.next().await {
+            results.push(item);
+        }
+
+        let prev_res = Arc::new(results.iter().fold(NodeResult::new(), |a, b| a.merge(b))); //TODO: process
+                                                                                            // let pre_result: T = pre(&arg_ptr, &prev_res);
+        let res = match timeout(Duration::from_secs(1), async {
+            handle_fn(&arg_ptr, prev_res.clone(), params_ptr)
+        })
+        .await
+        {
+            Err(_) => NodeResult::Err("timeout"),
+            Ok(val) => val,
+        };
+        // post_fn(&arg_ptr, &prev_res, &pre_result);
+        res
     }
 }
 
