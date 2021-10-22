@@ -14,6 +14,8 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::timeout;
+use std::ops::{Deref, DerefMut};
+use std::rc::Rc;
 
 #[derive(Clone, Debug)]
 pub enum NodeResult {
@@ -260,18 +262,21 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
             >,
         > = Arc::new(HashMap::new());
         for leaf in leaf_nodes.iter() {
-            let dag_futures_ptr_copy = Arc::clone(&dag_futures_ptr);
-            // *dag_futures_ptr.insert(
-            //     leaf.to_string(),
-            //     dfs_node(
-            //         dag_futures_ptr_copy,
-            //         Arc::clone(&have_handled),
-            //         Arc::clone(&nodes_ptr),
-            //         leaf.clone(),
-            //     )
-            //     .boxed()
-            //     .shared(),
-            // );
+            let dag_futures_ptr_copy = Arc::clone(&dag_futures_ptr);  
+            // let entry = async move {
+            //     println!("oihiohiohoiho {:?}", leaf.clone());
+            //     NodeResult::new()
+            // };           
+            (*dag_futures_ptr).insert(
+                leaf.to_string(),
+                // entry.boxed().shared()
+                dfs_node(
+                    dag_futures_ptr_copy,
+                    Arc::clone(&have_handled),
+                    Arc::clone(&nodes_ptr),
+                    leaf.clone()
+                ).boxed().shared()
+            );
         }
 
         // TODO: make it DFS
