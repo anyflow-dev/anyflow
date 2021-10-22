@@ -10,8 +10,8 @@ use std::any::Any;
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-
 use std::pin::Pin;
+use tokio::time::timeout;
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -126,7 +126,7 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
     pre: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a NodeResult) -> T + Send + Sync>,
     post: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a NodeResult, &T) + Send + Sync>,
     timeout_cb: Arc<dyn for<'a> Fn() + Send + Sync>,
-    failure_cb: Arc<dyn for<'a> Fn(&'a NodeResult)>,
+    failure_cb: Arc<dyn for<'a> Fn(&'a NodeResult) + Send + Sync>,
 
     // register
     node_mapping: HashMap<
@@ -151,7 +151,7 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
 
 // impl<T: Default + Sync + Send, E: Send + Sync> Copy for Flow<T, E> {}
 
-impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
+impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
     pub fn new() -> Flow<T, E> {
         Flow {
             nodes: HashMap::new(),
@@ -225,7 +225,7 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
         Ok(())
     }
 
-    pub async fn make_flow(&self, _args: Arc<E>) -> Vec<NodeResult> {
+    pub async fn make_flow(&self, args: Arc<E>) -> Vec<NodeResult> {
         let leaf_nodes: HashSet<String> = self
             .nodes
             .values()
@@ -294,6 +294,17 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
                     Arc::clone(&have_handled),
                     Arc::clone(&nodes_ptr),
                     leaf.clone(),
+                    Arc::clone(&self.pre),
+                    Arc::clone(&self.post),
+                    Arc::clone(&self.timeout_cb),
+                    Arc::clone(&self.failure_cb),
+                    Arc::new(
+                        self.node_mapping
+                            .iter()
+                            .map(|(key, val)| (key.clone(), Arc::clone(&val)))
+                            .collect(),
+                    ),
+                    Arc::clone(&args),
                 )
                 .boxed()
                 .shared(),
@@ -390,6 +401,23 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
         have_handled: Arc<Mutex<HashSet<String>>>,
         nodes: Arc<HashMap<String, Box<DAGNode>>>,
         node: String,
+        pre: Arc<dyn for<'b> Fn(&'b Arc<E>, &'b NodeResult) -> T + Send + Sync>,
+        post: Arc<dyn for<'b> Fn(&'b Arc<E>, &'b NodeResult, &T) + Send + Sync>,
+        timeout_cb: Arc<dyn Fn() + Send + Sync>,
+        failure_cb: Arc<dyn for<'b> Fn(&'b NodeResult) + Send + Sync>,
+
+        // register
+        node_mapping: Arc<
+            HashMap<
+                String,
+                Arc<
+                    dyn for<'b> Fn(&'b Arc<E>, Arc<NodeResult>, Box<RawValue>) -> NodeResult
+                        + Sync
+                        + Send,
+                >,
+            >,
+        >,
+        args: Arc<E>,
     ) -> NodeResult {
         println!("xxx {:?}", node);
         if nodes.get(&node).unwrap().prevs.is_empty() {
@@ -401,15 +429,27 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
             let dag_futures_ptr = Arc::clone(&dag_futures);
             let have_handled_ptr = Arc::clone(&have_handled);
             let nodes_ptr = Arc::clone(&nodes);
+            let pre_ptr = Arc::clone(&pre);
+            let post_ptr = Arc::clone(&post);
+            let timeout_cb_ptr = Arc::clone(&timeout_cb);
+            let failure_cb_ptr = Arc::clone(&failure_cb);
+            let node_mapping_ptr = Arc::clone(&node_mapping);
+            let arg_ptr = Arc::clone(&args);
 
             if !have_handled.lock().unwrap().contains(&prev.to_string()) {
                 dag_futures.lock().unwrap().insert(
                     prev.to_string(),
-                    dfs_node(
+                    Flow::<T, E>::dfs_node(
                         dag_futures_ptr,
                         have_handled_ptr,
                         nodes_ptr,
                         prev_ptr.to_string(),
+                        pre_ptr,
+                        post_ptr,
+                        timeout_cb_ptr,
+                        failure_cb_ptr,
+                        node_mapping_ptr,
+                        arg_ptr,
                     )
                     .boxed()
                     .shared(),
@@ -419,8 +459,28 @@ impl<T: Default + Send + Sync, E: Send + Sync> Flow<T, E> {
             deps.push(dag_futures.lock().unwrap().get(prev).unwrap().clone());
         }
 
+        let params_ptr = nodes.get(&node).unwrap().node_config.params.clone();
+        let handle_fn = Arc::clone(
+            node_mapping
+                .get(&nodes.get(&node).unwrap().node_config.node)
+                .unwrap(),
+        );
+        let arg_ptr = Arc::clone(&args);
         join_all(deps)
-            .then(|_x| async move { NodeResult::new() })
+            .then(|results| async move {
+                let prev_res = Arc::new(results.iter().fold(NodeResult::new(), |a, b| a.merge(b))); //TODO: process
+                                                                                                    // let pre_result: T = pre(&arg_ptr, &prev_res);
+                let res = match timeout(Duration::from_secs(1), async {
+                    handle_fn(&arg_ptr, prev_res.clone(), params_ptr)
+                })
+                .await
+                {
+                    Err(_) => NodeResult::Err("timeout"),
+                    Ok(val) => val,
+                };
+                // post_fn(&arg_ptr, &prev_res, &pre_result);
+                res
+            })
             .await
         // return A::default();
     }
@@ -436,50 +496,70 @@ struct A {}
 unsafe impl Send for A {}
 unsafe impl Sync for A {}
 
-#[async_recursion]
-async fn dfs_node<'a>(
-    dag_futures: Arc<
-        Mutex<
-            HashMap<
-                std::string::String,
-                Shared<Pin<Box<dyn futures::Future<Output = NodeResult> + std::marker::Send>>>,
-            >,
-        >,
-    >,
-    have_handled: Arc<Mutex<HashSet<String>>>,
-    nodes: Arc<HashMap<String, Box<DAGNode>>>,
-    node: String,
-) -> NodeResult {
-    println!("xxx {:?}", node);
-    if nodes.get(&node).unwrap().prevs.is_empty() {
-        return NodeResult::new();
-    }
-    let mut deps = Vec::new();
-    for prev in nodes.get(&node).unwrap().prevs.iter() {
-        let prev_ptr = Arc::new(prev);
-        let dag_futures_ptr = Arc::clone(&dag_futures);
-        let have_handled_ptr = Arc::clone(&have_handled);
-        let nodes_ptr = Arc::clone(&nodes);
+// #[async_recursion]
+// async fn dfs_node<'a>(
+//     dag_futures: Arc<
+//         Mutex<
+//             HashMap<
+//                 std::string::String,
+//                 Shared<Pin<Box<dyn futures::Future<Output = NodeResult> + std::marker::Send>>>,
+//             >,
+//         >,
+//     >,
+//     have_handled: Arc<Mutex<HashSet<String>>>,
+//     nodes: Arc<HashMap<String, Box<DAGNode>>>,
+//     node: String,
+//     pre: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a NodeResult) -> T + Send + Sync>,
+//     post: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a NodeResult, &T) + Send + Sync>,
+//     timeout_cb: Arc<dyn for<'a> Fn() + Send + Sync>,
+//     failure_cb: Arc<dyn for<'a> Fn(&'a NodeResult)>,
 
-        if !have_handled.lock().unwrap().contains(&prev.to_string()) {
-            dag_futures.lock().unwrap().insert(
-                prev.to_string(),
-                dfs_node(
-                    dag_futures_ptr,
-                    have_handled_ptr,
-                    nodes_ptr,
-                    prev_ptr.to_string(),
-                )
-                .boxed()
-                .shared(),
-            );
-            have_handled.lock().unwrap().insert(prev_ptr.to_string());
-        }
-        deps.push(dag_futures.lock().unwrap().get(prev).unwrap().clone());
-    }
+//     // register
+//     node_mapping: HashMap<
+//         String,
+//         Arc<dyn for<'a> Fn(&'a Arc<E>, Arc<NodeResult>, Box<RawValue>) -> NodeResult + Sync + Send>,
+//     >,
+// ) -> NodeResult {
+//     println!("xxx {:?}", node);
+//     if nodes.get(&node).unwrap().prevs.is_empty() {
+//         return NodeResult::new();
+//     }
+//     let mut deps = Vec::new();
+//     for prev in nodes.get(&node).unwrap().prevs.iter() {
+//         let prev_ptr = Arc::new(prev);
+//         let dag_futures_ptr = Arc::clone(&dag_futures);
+//         let have_handled_ptr = Arc::clone(&have_handled);
+//         let nodes_ptr = Arc::clone(&nodes);
+//         let pre_ptr = Arc::clone(&pre);
+//         let post_ptr = Arc::clone(&post);
+//         let timeout_cb_ptr = Arc::clone(&timeout_cb);
+//         let failure_cb_ptr = Arc::clone(&failure_cb);
+//         let node_mapping_ptr = Arc::clone(&node_mapping);
 
-    join_all(deps)
-        .then(|_x| async move { NodeResult::new() })
-        .await
-    // return A::default();
-}
+//         if !have_handled.lock().unwrap().contains(&prev.to_string()) {
+//             dag_futures.lock().unwrap().insert(
+//                 prev.to_string(),
+//                 dfs_node(
+//                     dag_futures_ptr,
+//                     have_handled_ptr,
+//                     nodes_ptr,
+//                     prev_ptr.to_string(),
+//                     pre_ptr,
+//                     post_ptr,
+//                     timeout_cb_ptr,
+//                     failure_cb_ptr,
+//                     node_mapping_ptr,
+//                 )
+//                 .boxed()
+//                 .shared(),
+//             );
+//             have_handled.lock().unwrap().insert(prev_ptr.to_string());
+//         }
+//         deps.push(dag_futures.lock().unwrap().get(prev).unwrap().clone());
+//     }
+
+//     join_all(deps)
+//         .then(|_x| async move { NodeResult::new() })
+//         .await
+//     // return A::default();
+// }
