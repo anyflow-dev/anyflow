@@ -24,6 +24,12 @@ pub enum FlowResult {
 unsafe impl Send for FlowResult {}
 unsafe impl Sync for FlowResult {}
 
+impl Default for FlowResult {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl FlowResult {
     pub fn new() -> FlowResult {
         FlowResult::Ok(HashMap::new())
@@ -138,6 +144,12 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
     >,
 }
 
+impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Default for Flow<T, E> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
     pub fn new() -> Flow<T, E> {
         Flow {
@@ -173,7 +185,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
     ) {
     }
 
-    pub fn init(&mut self, conf_content: &str) -> Result<(),  String> {
+    pub fn init(&mut self, conf_content: &str) -> Result<(), String> {
         let dag_config: DAGConfig = serde_json::from_str(conf_content).unwrap();
         for node_config in dag_config.nodes.iter() {
             self.nodes.insert(
@@ -208,7 +220,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                     .insert(node_config.name.clone());
             }
         }
-        
+
         let root_nodes: HashSet<String> = self
             .nodes
             .values()
@@ -216,7 +228,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             .map(|node| node.node_config.name.clone())
             .collect();
         for root in root_nodes {
-            if (!self.check_flow(&mut HashSet::new(), root.to_string())) {
+            if !self.check_flow(&mut HashSet::new(), root.to_string()) {
                 return Err(("have cycle").to_string());
             }
         }
@@ -235,11 +247,11 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
 
         path.insert(cur);
         for next in &node.nexts {
-            if (!self.check_flow(path, next.to_string())) {
+            if !self.check_flow(path, next.to_string()) {
                 return false;
             }
         }
-        return true;
+        true
     }
 
     pub async fn make_flow(&self, args: Arc<E>) -> Vec<FlowResult> {
