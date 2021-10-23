@@ -31,7 +31,7 @@ fn calc<'a, E: Send + Sync>(
 
 #[tokio::main]
 async fn main() {
-    let guard = pprof::ProfilerGuard::new(100).unwrap();
+    // let guard = pprof::ProfilerGuard::new(100).unwrap();
 
     let mut dag = anyflow::dag::Flow::<i32, i32>::new();
     let data = fs::read_to_string("dag.json").expect("Unable to read file");
@@ -42,10 +42,10 @@ async fn main() {
         // println!("{:?}", my_dag.await[0].get::<i32>("res"));
     }
 
-    if let Ok(report) = guard.report().build() {
-        let file = File::create("flamegraph.svg").unwrap();
-        let mut options = pprof::flamegraph::Options::default();
-        options.image_width = Some(1800);
-        report.flamegraph_with_options(file, &mut options).unwrap();
-    };
+    // if let Ok(report) = guard.report().build() {
+    //     let file = File::create("flamegraph.svg").unwrap();
+    //     let mut options = pprof::flamegraph::Options::default();
+    //     options.image_width = Some(1800);
+    //     report.flamegraph_with_options(file, &mut options).unwrap();
+    // };
 }
