@@ -50,7 +50,7 @@ impl FlowResult {
                 kv.insert(key.to_string(), Arc::new(val));
                 self
             }
-            FlowResult::Err(e) => self,
+            FlowResult::Err(_e) => self,
         }
     }
     fn merge(&self, other: &FlowResult) -> FlowResult {
@@ -399,13 +399,13 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         .await
         {
             Err(_) => {
-                timeout_cb_fn(Arc::clone(&nodes.get(&node).unwrap()), &prev_res);
+                timeout_cb_fn(Arc::clone(nodes.get(&node).unwrap()), &prev_res);
                 FlowResult::Err("timeout")
             }
             Ok(val) => val,
         };
         if res.is_err() {
-            failure_cb_fn(Arc::clone(&nodes.get(&node).unwrap()), &prev_res, &res);
+            failure_cb_fn(Arc::clone(nodes.get(&node).unwrap()), &prev_res, &res);
         }
         post_fn(&arg_ptr, &prev_res, &pre_result);
         res
