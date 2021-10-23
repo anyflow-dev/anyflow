@@ -1,24 +1,15 @@
 [package]
-name = "anyflow"
+name = "calculator"
 version = "0.1.0"
 edition = "2018"
 
-
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-async-trait = "0.1"
-async-recursion = "0.3.2"
+anyflow = { path = "../../../anyflow"}
 serde = { version = "1.0", features = ["derive"] }
 serde_json = { version = "1.0" , features = ["raw_value"] }
-futures = { version = "0.3.17" }
-async-std = { version="1.1"}
-macros = { path = "macros"}
-
-[dev-dependencies]
-criterion = "0.3"
 tokio = {version = "1.12.0", features = ["full"] }
 smol = {version = "1.2.5"}
-
-[[bench]]
-name = "benchmark"
-harness = false
+pprof = { version = "0.6.0", features = ["flamegraph"] }
+regex = "1"

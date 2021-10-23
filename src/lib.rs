@@ -1,4 +1,3 @@
-mod dag;
-fn main() {
-    println!("Hello, world!");
-}
+pub mod dag;
+pub use dag::Flow;
+pub use dag::FlowResult;
