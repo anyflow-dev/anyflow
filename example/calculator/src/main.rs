@@ -23,7 +23,7 @@ fn calc<'a, E: Send + Sync>(
         Ok(val) => val.clone(),
         Err(e) => 0,
     };
-    // println!("params {:?} {:?}", p, val);
+    println!("params {:?} {:?}", p, val);
     let mut r = anyflow::dag::FlowResult::new();
     r.set("res", val + p.val);
     r
@@ -34,7 +34,7 @@ fn smol_main() {
     let data = fs::read_to_string("dag.json").expect("Unable to read file");
     println!("{:?}", dag.init(&data));
     dag.register("calc", Arc::new(calc));
-    for i in 0..100000 {
+    for i in 0..1000 {
         let my_dag = dag.make_flow(Arc::new(1));
         // println!("{:?}", my_dag.await[0].get::<i32>("res"));
         smol::block_on(my_dag);
@@ -42,25 +42,25 @@ fn smol_main() {
 }
 
 fn tokio_main() {
-    let guard = pprof::ProfilerGuard::new(100).unwrap();
+    // let guard = pprof::ProfilerGuard::new(100).unwrap();
 
     let mut dag = anyflow::dag::Flow::<i32, i32>::new();
     let data = fs::read_to_string("dag.json").expect("Unable to read file");
     println!("{:?}", dag.init(&data));
     dag.register("calc", Arc::new(calc));
     let rt = tokio::runtime::Runtime::new().unwrap();
-    for i in 0..100000 {
+    for i in 0..1000 {
         let my_dag = dag.make_flow(Arc::new(1));
         // println!("{:?}", my_dag.await[0].get::<i32>("res"));
         rt.block_on(my_dag);
     }
 
-    if let Ok(report) = guard.report().build() {
-        let file = File::create("flamegraph.svg").unwrap();
-        let mut options = pprof::flamegraph::Options::default();
-        options.image_width = Some(1800);
-        report.flamegraph_with_options(file, &mut options).unwrap();
-    };
+    // if let Ok(report) = guard.report().build() {
+    //     let file = File::create("flamegraph.svg").unwrap();
+    //     let mut options = pprof::flamegraph::Options::default();
+    //     options.image_width = Some(1800);
+    //     report.flamegraph_with_options(file, &mut options).unwrap();
+    // };
 }
 
 fn main() {
