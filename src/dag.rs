@@ -84,6 +84,13 @@ impl FlowResult {
             FlowResult::Err(e) => Err(e),
         }
     }
+
+    fn is_err(&self) -> bool {
+        match self {
+            FlowResult::Ok(_) => true,
+            FlowResult::Err(_) => false,
+        }
+    }
 }
 
 #[derive(Deserialize, Default, Debug, Clone)]
@@ -110,17 +117,6 @@ pub struct DAGNode {
     nexts: HashSet<String>,
 }
 
-fn handle_wrapper<'a, E: Send + Sync>(
-    _graph_args: &'a Arc<E>,
-    _input: Arc<FlowResult>,
-    _params: Box<RawValue>,
-) -> FlowResult {
-    let mut t = FlowResult::new();
-    t.set("xxx", DAGConfig::default());
-    let _c = t.get::<DAGConfig>("xxx");
-    t
-}
-
 pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
     nodes: HashMap<String, Box<DAGNode>>,
 
@@ -128,13 +124,17 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
     timeout: Duration,
     pre: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a FlowResult) -> T + Send + Sync>,
     post: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a FlowResult, &T) + Send + Sync>,
-    timeout_cb: Arc<dyn for<'a> Fn() + Send + Sync>,
-    failure_cb: Arc<dyn for<'a> Fn(&'a FlowResult) + Send + Sync>,
+    timeout_cb: Arc<dyn for<'b> Fn(Arc<DAGNode>, &'b FlowResult) + Send + Sync>,
+    failure_cb: Arc<dyn for<'a> Fn(Arc<DAGNode>, &'a FlowResult, &'a FlowResult) + Send + Sync>,
 
     // register
     node_mapping: HashMap<
         String,
-        Arc<dyn for<'a> Fn(&'a Arc<E>, Arc<FlowResult>, Box<RawValue>) -> FlowResult + Sync + Send>,
+        Arc<
+            dyn for<'a> Fn(&'a Arc<E>, Arc<FlowResult>, &'a Box<RawValue>) -> FlowResult
+                + Sync
+                + Send,
+        >,
     >,
 }
 
@@ -143,10 +143,10 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         Flow {
             nodes: HashMap::new(),
             timeout: Duration::from_secs(5),
-            pre: Arc::new(|_a, _b| T::default()),
-            post: Arc::new(|_a, _b, _c| {}),
-            timeout_cb: Arc::new(|| {}),
-            failure_cb: Arc::new(|_a| {}),
+            pre: Arc::new(|_, _| T::default()), // placeholder
+            post: Arc::new(|_, _, _| {}),       // placeholder
+            timeout_cb: Arc::new(|_, _| {}),    // placeholder
+            failure_cb: Arc::new(|_, _, _| {}), // placeholder
             node_mapping: HashMap::new(),
         }
     }
@@ -155,7 +155,9 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         &mut self,
         node_name: &str,
         handle: Arc<
-            dyn for<'a> Fn(&'a Arc<E>, Arc<FlowResult>, Box<RawValue>) -> FlowResult + Sync + Send,
+            dyn for<'a> Fn(&'a Arc<E>, Arc<FlowResult>, &'a Box<RawValue>) -> FlowResult
+                + Sync
+                + Send,
         >,
     ) {
         self.node_mapping
@@ -234,10 +236,10 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
 
         let have_handled: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
 
-        let nodes_ptr: Arc<HashMap<String, Box<DAGNode>>> = Arc::new(
+        let nodes_ptr: Arc<HashMap<String, Arc<DAGNode>>> = Arc::new(
             self.nodes
                 .iter()
-                .map(|(k, v)| (k.clone(), Box::new(*v.clone())))
+                .map(|(k, v)| (k.clone(), Arc::new(*v.clone())))
                 .collect(),
         );
         let _n: Arc<Vec<Box<String>>> = Arc::new(
@@ -316,17 +318,19 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             >,
         >,
         have_handled: Arc<Mutex<HashSet<String>>>,
-        nodes: Arc<HashMap<String, Box<DAGNode>>>,
+        nodes: Arc<HashMap<String, Arc<DAGNode>>>,
         node: String,
         pre_fn: Arc<dyn for<'b> Fn(&'b Arc<E>, &'b FlowResult) -> T + Send + Sync>,
         post_fn: Arc<dyn for<'b> Fn(&'b Arc<E>, &'b FlowResult, &T) + Send + Sync>,
-        timeout_cb_fn: Arc<dyn Fn() + Send + Sync>,
-        failure_cb_fn: Arc<dyn for<'b> Fn(&'b FlowResult) + Send + Sync>,
+        timeout_cb_fn: Arc<dyn for<'b> Fn(Arc<DAGNode>, &'b FlowResult) + Send + Sync>,
+        failure_cb_fn: Arc<
+            dyn for<'b> Fn(Arc<DAGNode>, &'b FlowResult, &'b FlowResult) + Send + Sync,
+        >,
         node_mapping: Arc<
             HashMap<
                 String,
                 Arc<
-                    dyn for<'b> Fn(&'b Arc<E>, Arc<FlowResult>, Box<RawValue>) -> FlowResult
+                    dyn for<'b> Fn(&'b Arc<E>, Arc<FlowResult>, &'b Box<RawValue>) -> FlowResult
                         + Sync
                         + Send,
                 >,
@@ -374,7 +378,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             }
         }
 
-        let params_ptr = nodes.get(&node).unwrap().node_config.params.clone();
+        let params_ptr = &nodes.get(&node).unwrap().node_config.params;
         let handle_fn = Arc::clone(
             node_mapping
                 .get(&nodes.get(&node).unwrap().node_config.node)
@@ -390,19 +394,20 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         let prev_res = Arc::new(results.iter().fold(FlowResult::new(), |a, b| a.merge(b))); //TODO: process
         let pre_result: T = pre_fn(&arg_ptr, &prev_res);
         let res = match async_std::future::timeout(Duration::from_secs(10), async {
-            handle_fn(&arg_ptr, prev_res.clone(), params_ptr)
+            handle_fn(&arg_ptr, Arc::clone(&prev_res), params_ptr)
         })
         .await
         {
-            Err(_) => FlowResult::Err("timeout"),
+            Err(_) => {
+                timeout_cb_fn(Arc::clone(&nodes.get(&node).unwrap()), &prev_res);
+                FlowResult::Err("timeout")
+            }
             Ok(val) => val,
         };
-        // let res = handle_fn(&arg_ptr, prev_res.clone(), params_ptr);
+        if res.is_err() {
+            failure_cb_fn(Arc::clone(&nodes.get(&node).unwrap()), &prev_res, &res);
+        }
         post_fn(&arg_ptr, &prev_res, &pre_result);
         res
     }
-}
-
-fn demo() {
-    let _dag = Flow::<i32, i32>::new().register("handle_wrapper", Arc::new(handle_wrapper));
 }
