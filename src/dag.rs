@@ -17,68 +17,72 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 #[derive(Clone, Debug)]
-pub enum NodeResult {
+pub enum FlowResult {
     Ok(HashMap<String, Arc<dyn Any + std::marker::Send>>),
     Err(&'static str),
 }
 
-unsafe impl Send for NodeResult {}
-unsafe impl Sync for NodeResult {}
+unsafe impl Send for FlowResult {}
+unsafe impl Sync for FlowResult {}
 
-impl NodeResult {
-    pub fn new() -> NodeResult {
-        NodeResult::Ok(HashMap::new())
+impl FlowResult {
+    pub fn new() -> FlowResult {
+        FlowResult::Ok(HashMap::new())
     }
-    pub fn get<T: Any + Debug + Clone>(&self, key: &str) -> Option<T> {
+    pub fn get<T: Any + Debug + Clone>(&self, key: &str) -> Result<&T, &'static str> {
         match self {
-            NodeResult::Ok(kv) => match kv.get(&key.to_string()) {
-                Some(val) => val.downcast_ref::<T>().cloned(),
-                None => None,
+            FlowResult::Ok(kv) => match kv.get(&key.to_string()) {
+                Some(val) => match val.downcast_ref::<T>() {
+                    Some(val) => Ok(val),
+                    None => Err("type error"),
+                },
+                None => Err("miss key"),
             },
-            NodeResult::Err(_) => None,
+            FlowResult::Err(e) => Err(e),
         }
     }
     pub fn set<T: Any + Debug + Clone + std::marker::Send>(
-        &self,
+        &mut self,
         key: &str,
-        val: &T,
-    ) -> NodeResult {
+        val: T,
+    ) -> &FlowResult {
         match self {
-            NodeResult::Ok(kv) => {
-                let mut new_kv = kv.clone();
-                new_kv.insert(key.to_string(), Arc::new(val.clone()));
-                NodeResult::Ok(new_kv)
+            FlowResult::Ok(kv) => {
+                kv.insert(key.to_string(), Arc::new(val));
+                self
             }
-            NodeResult::Err(e) => NodeResult::Err(e),
+            FlowResult::Err(e) => self,
         }
     }
-    fn merge(&self, other: &NodeResult) -> NodeResult {
+    fn merge(&self, other: &FlowResult) -> FlowResult {
         match self {
-            NodeResult::Ok(kv) => {
+            FlowResult::Ok(kv) => {
                 let mut new_kv = kv.clone();
                 match other {
-                    NodeResult::Ok(other_kv) => new_kv.extend(other_kv.clone()),
-                    NodeResult::Err(_e) => {}
+                    FlowResult::Ok(other_kv) => new_kv.extend(other_kv.clone()),
+                    FlowResult::Err(_e) => {}
                 }
-                NodeResult::Ok(new_kv)
+                FlowResult::Ok(new_kv)
             }
-            NodeResult::Err(e) => NodeResult::Err(e),
+            FlowResult::Err(e) => FlowResult::Err(e),
         }
     }
 
-    fn get_map<T: Any + Debug + Clone + std::marker::Send>(&self) -> Option<HashMap<String, T>> {
+    pub fn get_map<T: Any + Debug + Clone + std::marker::Send>(
+        &self,
+    ) -> Result<HashMap<String, &T>, &'static str> {
         match self {
-            NodeResult::Ok(kv) => {
+            FlowResult::Ok(kv) => {
                 let mut ret = HashMap::new();
                 for (k, v) in kv {
-                    match v.downcast_ref::<T>().cloned() {
-                        Some(val) => ret.insert(k.clone(), val.clone()),
-                        None => None,
+                    match v.downcast_ref::<T>() {
+                        Some(val) => ret.insert(k.clone(), val),
+                        None => return Err("type assert failed"),
                     };
                 }
-                Some(ret)
+                Ok(ret)
             }
-            NodeResult::Err(_) => None,
+            FlowResult::Err(e) => Err(e),
         }
     }
 }
@@ -109,11 +113,11 @@ pub struct DAGNode {
 
 fn handle_wrapper<'a, E: Send + Sync>(
     _graph_args: &'a Arc<E>,
-    _input: Arc<NodeResult>,
+    _input: Arc<FlowResult>,
     _params: Box<RawValue>,
-) -> NodeResult {
-    let t = NodeResult::new();
-    t.set("xxx", &DAGConfig::default());
+) -> FlowResult {
+    let mut t = FlowResult::new();
+    t.set("xxx", DAGConfig::default());
     let _c = t.get::<DAGConfig>("xxx");
     t
 }
@@ -123,15 +127,15 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
 
     // global configures
     timeout: Duration,
-    pre: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a NodeResult) -> T + Send + Sync>,
-    post: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a NodeResult, &T) + Send + Sync>,
+    pre: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a FlowResult) -> T + Send + Sync>,
+    post: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a FlowResult, &T) + Send + Sync>,
     timeout_cb: Arc<dyn for<'a> Fn() + Send + Sync>,
-    failure_cb: Arc<dyn for<'a> Fn(&'a NodeResult) + Send + Sync>,
+    failure_cb: Arc<dyn for<'a> Fn(&'a FlowResult) + Send + Sync>,
 
     // register
     node_mapping: HashMap<
         String,
-        Arc<dyn for<'a> Fn(&'a Arc<E>, Arc<NodeResult>, Box<RawValue>) -> NodeResult + Sync + Send>,
+        Arc<dyn for<'a> Fn(&'a Arc<E>, Arc<FlowResult>, Box<RawValue>) -> FlowResult + Sync + Send>,
     >,
 }
 
@@ -152,7 +156,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         &mut self,
         node_name: &str,
         handle: Arc<
-            dyn for<'a> Fn(&'a Arc<E>, Arc<NodeResult>, Box<RawValue>) -> NodeResult + Sync + Send,
+            dyn for<'a> Fn(&'a Arc<E>, Arc<FlowResult>, Box<RawValue>) -> FlowResult + Sync + Send,
         >,
     ) {
         self.node_mapping
@@ -163,7 +167,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         &mut self,
         _nodes: &[(
             &str,
-            &(dyn for<'a> Fn(&'a Arc<E>, Arc<NodeResult>) -> NodeResult + Sync + Send),
+            &(dyn for<'a> Fn(&'a Arc<E>, Arc<FlowResult>) -> FlowResult + Sync + Send),
         )],
     ) {
     }
@@ -204,12 +208,10 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             }
         }
 
-        // println!("data: {:?}", self.nodes);
-
         Ok(())
     }
 
-    pub async fn make_flow(&self, args: Arc<E>) -> Vec<NodeResult> {
+    pub async fn make_flow(&self, args: Arc<E>) -> Vec<FlowResult> {
         let leaf_nodes: HashSet<String> = self
             .nodes
             .values()
@@ -225,7 +227,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         //     .map(|(node_name, _)| {
         //         let entry = async move {
         //             println!("oihiohiohoiho {:?}", node_name.clone());
-        //             NodeResult::new()
+        //             FlowResult::new()
         //         };
         //         (node_name.clone(), Box::new(entry.boxed().shared()))
         //     })
@@ -250,7 +252,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         //         .map(|node_name| {
         //             let entry = async move {
         //                 println!("oihiohiohoiho {:?}", *node_name.clone());
-        //                 NodeResult::new()
+        //                 FlowResult::new()
         //             };
         //             (*node_name.clone(), entry.boxed().shared())
         //         })
@@ -260,16 +262,12 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             Mutex<
                 HashMap<
                     std::string::String,
-                    Shared<Pin<Box<dyn futures::Future<Output = NodeResult> + std::marker::Send>>>,
+                    Shared<Pin<Box<dyn futures::Future<Output = FlowResult> + std::marker::Send>>>,
                 >,
             >,
         > = Arc::new(Mutex::new(HashMap::new()));
         for leaf in leaf_nodes.iter() {
             let dag_futures_ptr_copy = Arc::clone(&dag_futures_ptr);
-            // let entry = async move {
-            //     println!("oihiohiohoiho {:?}", leaf.clone());
-            //     NodeResult::new()
-            // };
             dag_futures_ptr.lock().unwrap().insert(
                 leaf.to_string(),
                 // entry.boxed().shared()
@@ -300,7 +298,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             .map(|leaf| dag_futures_ptr.lock().unwrap().get(&*leaf).unwrap().clone())
             .collect();
 
-        let mut results = Vec::new();
+        let mut results = Vec::with_capacity(leaves.len());
 
         while let Some(item) = leaves.next().await {
             results.push(item);
@@ -314,45 +312,43 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             Mutex<
                 HashMap<
                     std::string::String,
-                    Shared<Pin<Box<dyn futures::Future<Output = NodeResult> + std::marker::Send>>>,
+                    Shared<Pin<Box<dyn futures::Future<Output = FlowResult> + std::marker::Send>>>,
                 >,
             >,
         >,
         have_handled: Arc<Mutex<HashSet<String>>>,
         nodes: Arc<HashMap<String, Box<DAGNode>>>,
         node: String,
-        pre: Arc<dyn for<'b> Fn(&'b Arc<E>, &'b NodeResult) -> T + Send + Sync>,
-        post: Arc<dyn for<'b> Fn(&'b Arc<E>, &'b NodeResult, &T) + Send + Sync>,
-        timeout_cb: Arc<dyn Fn() + Send + Sync>,
-        failure_cb: Arc<dyn for<'b> Fn(&'b NodeResult) + Send + Sync>,
-
-        // register
+        pre_fn: Arc<dyn for<'b> Fn(&'b Arc<E>, &'b FlowResult) -> T + Send + Sync>,
+        post_fn: Arc<dyn for<'b> Fn(&'b Arc<E>, &'b FlowResult, &T) + Send + Sync>,
+        timeout_cb_fn: Arc<dyn Fn() + Send + Sync>,
+        failure_cb_fn: Arc<dyn for<'b> Fn(&'b FlowResult) + Send + Sync>,
         node_mapping: Arc<
             HashMap<
                 String,
                 Arc<
-                    dyn for<'b> Fn(&'b Arc<E>, Arc<NodeResult>, Box<RawValue>) -> NodeResult
+                    dyn for<'b> Fn(&'b Arc<E>, Arc<FlowResult>, Box<RawValue>) -> FlowResult
                         + Sync
                         + Send,
                 >,
             >,
         >,
         args: Arc<E>,
-    ) -> NodeResult {
+    ) -> FlowResult {
         // println!("xxx {:?}", node);
         let mut deps = futures::stream::FuturesUnordered::new();
         if nodes.get(&node).unwrap().prevs.is_empty() {
-            deps.push(async { NodeResult::new() }.boxed().shared());
+            deps.push(async { FlowResult::new() }.boxed().shared());
         } else {
             for prev in nodes.get(&node).unwrap().prevs.iter() {
                 let prev_ptr = Arc::new(prev);
                 let dag_futures_ptr = Arc::clone(&dag_futures);
                 let have_handled_ptr = Arc::clone(&have_handled);
                 let nodes_ptr = Arc::clone(&nodes);
-                let pre_ptr = Arc::clone(&pre);
-                let post_ptr = Arc::clone(&post);
-                let timeout_cb_ptr = Arc::clone(&timeout_cb);
-                let failure_cb_ptr = Arc::clone(&failure_cb);
+                let pre_ptr = Arc::clone(&pre_fn);
+                let post_ptr = Arc::clone(&post_fn);
+                let timeout_cb_ptr = Arc::clone(&timeout_cb_fn);
+                let failure_cb_ptr = Arc::clone(&failure_cb_fn);
                 let node_mapping_ptr = Arc::clone(&node_mapping);
                 let arg_ptr = Arc::clone(&args);
 
@@ -393,17 +389,17 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             results.push(item);
         }
 
-        let prev_res = Arc::new(results.iter().fold(NodeResult::new(), |a, b| a.merge(b))); //TODO: process
-                                                                                            // let pre_result: T = pre(&arg_ptr, &prev_res);
+        let prev_res = Arc::new(results.iter().fold(FlowResult::new(), |a, b| a.merge(b))); //TODO: process
+        let pre_result: T = pre_fn(&arg_ptr, &prev_res);
         let res = match timeout(Duration::from_secs(1), async {
             handle_fn(&arg_ptr, prev_res.clone(), params_ptr)
         })
         .await
         {
-            Err(_) => NodeResult::Err("timeout"),
+            Err(_) => FlowResult::Err("timeout"),
             Ok(val) => val,
         };
-        // post_fn(&arg_ptr, &prev_res, &pre_result);
+        post_fn(&arg_ptr, &prev_res, &pre_result);
         res
     }
 }
