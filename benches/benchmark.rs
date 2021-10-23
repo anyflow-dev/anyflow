@@ -2,10 +2,10 @@ use async_std::task;
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
-use serde_json::{Result, Value};
-use smol::{io, net, prelude::*, Unblock};
+
+
 use std::fs;
-use std::fs::File;
+
 use std::sync::Arc;
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -20,8 +20,8 @@ fn calc<'a, E: Send + Sync>(
 ) -> anyflow::FlowResult {
     let p: Val = serde_json::from_str(params.get()).unwrap();
     let val: i32 = match input.get::<i32>("res") {
-        Ok(val) => val.clone(),
-        Err(e) => 0,
+        Ok(val) => *val,
+        Err(_e) => 0,
     };
     let mut r = anyflow::FlowResult::new();
     r.set("res", val + p.val);
@@ -32,7 +32,7 @@ fn smol_main(times: i32) {
     let data = fs::read_to_string("dag.json").expect("Unable to read file");
     dag.init(&data).unwrap();
     dag.register("calc", Arc::new(calc));
-    for i in 0..times {
+    for _i in 0..times {
         let my_dag = dag.make_flow(Arc::new(1));
         smol::block_on(my_dag);
     }
@@ -44,7 +44,7 @@ fn tokio_main(times: i32) {
     dag.init(&data).unwrap();
     dag.register("calc", Arc::new(calc));
     let rt = tokio::runtime::Runtime::new().unwrap();
-    for i in 0..times {
+    for _i in 0..times {
         let my_dag = dag.make_flow(Arc::new(1));
         rt.block_on(my_dag);
     }
@@ -55,7 +55,7 @@ fn async_std_main(times: i32) {
     let data = fs::read_to_string("dag.json").expect("Unable to read file");
     dag.init(&data).unwrap();
     dag.register("calc", Arc::new(calc));
-    for i in 0..times {
+    for _i in 0..times {
         let my_dag = dag.make_flow(Arc::new(1));
         task::block_on(my_dag);
     }
