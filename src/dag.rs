@@ -173,7 +173,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
     ) {
     }
 
-    pub fn init(&mut self, conf_content: &str) -> Result<(), String> {
+    pub fn init(&mut self, conf_content: &str) -> Result<(),  String> {
         let dag_config: DAGConfig = serde_json::from_str(conf_content).unwrap();
         for node_config in dag_config.nodes.iter() {
             self.nodes.insert(
@@ -208,8 +208,38 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                     .insert(node_config.name.clone());
             }
         }
+        
+        let root_nodes: HashSet<String> = self
+            .nodes
+            .values()
+            .filter(|node| node.prevs.is_empty())
+            .map(|node| node.node_config.name.clone())
+            .collect();
+        for root in root_nodes {
+            if (!self.check_flow(&mut HashSet::new(), root.to_string())) {
+                return Err(("have cycle").to_string());
+            }
+        }
 
         Ok(())
+    }
+
+    fn check_flow<'a>(&self, path: &mut HashSet<String>, cur: String) -> bool {
+        if path.contains(&cur) {
+            return false;
+        }
+        let node = self.nodes.get(&cur).unwrap();
+        if node.nexts.is_empty() {
+            return true;
+        }
+
+        path.insert(cur);
+        for next in &node.nexts {
+            if (!self.check_flow(path, next.to_string())) {
+                return false;
+            }
+        }
+        return true;
     }
 
     pub async fn make_flow(&self, args: Arc<E>) -> Vec<FlowResult> {

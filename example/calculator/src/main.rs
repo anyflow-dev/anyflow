@@ -81,7 +81,7 @@ fn tokio_main() {
 }
 
 fn async_std_main() {
-    let guard = pprof::ProfilerGuard::new(100).unwrap();
+    // let guard = pprof::ProfilerGuard::new(100).unwrap();
 
     let mut dag = anyflow::dag::Flow::<i32, i32>::new();
     let data = fs::read_to_string("dag.json").expect("Unable to read file");
@@ -92,17 +92,17 @@ fn async_std_main() {
         task::block_on(my_dag);
     }
 
-    match guard.report().build() {
-        Ok(report) => {
-            let file = File::create("flamegraph.svg").unwrap();
-            report.flamegraph(file).unwrap();
+    // match guard.report().build() {
+    //     Ok(report) => {
+    //         let file = File::create("flamegraph.svg").unwrap();
+    //         report.flamegraph(file).unwrap();
 
-            println!("{:?}", report);
-        }
-        Err(_) => {}
-    };
+    //         println!("{:?}", report);
+    //     }
+    //     Err(_) => {}
+    // };
 }
 
 fn main() {
-    tokio_main();
+    async_std_main();
 }
