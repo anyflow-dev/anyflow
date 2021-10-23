@@ -391,14 +391,15 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
 
         let prev_res = Arc::new(results.iter().fold(FlowResult::new(), |a, b| a.merge(b))); //TODO: process
         let pre_result: T = pre_fn(&arg_ptr, &prev_res);
-        let res = match timeout(Duration::from_secs(1), async {
-            handle_fn(&arg_ptr, prev_res.clone(), params_ptr)
-        })
-        .await
-        {
-            Err(_) => FlowResult::Err("timeout"),
-            Ok(val) => val,
-        };
+        // let res = match timeout(Duration::from_secs(1), async {
+        //     handle_fn(&arg_ptr, prev_res.clone(), params_ptr)
+        // })
+        // .await
+        // {
+        //     Err(_) => FlowResult::Err("timeout"),
+        //     Ok(val) => val,
+        // };
+        let res = handle_fn(&arg_ptr, prev_res.clone(), params_ptr);
         post_fn(&arg_ptr, &prev_res, &pre_result);
         res
     }
