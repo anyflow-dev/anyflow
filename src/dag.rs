@@ -1,18 +1,18 @@
 use async_recursion::async_recursion;
+use async_std;
+use dashmap::DashMap;
 use futures::future::FutureExt;
 use futures::future::Shared;
 use futures::StreamExt;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::any::Any;
-use async_std;
-use dashmap::DashMap;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use std::time::{SystemTime};
+use std::time::SystemTime;
 
 #[derive(Clone, Debug)]
 pub enum FlowResult {
@@ -287,12 +287,12 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                 .map(|(k, v)| (k.clone(), Arc::new(*v.clone())))
                 .collect(),
         );
-        let _n: Arc<Vec<Box<String>>> = Arc::new(
-            self.nodes
-                .iter()
-                .map(|(key, _val)| Box::new(key.clone()))
-                .collect(),
-        );
+        // let _n: Arc<Vec<Box<String>>> = Arc::new(
+        //     self.nodes
+        //         .iter()
+        //         .map(|(key, _val)| Box::new(key.clone()))
+        //         .collect(),
+        // );
         // let mut dag_futures_ptr: Arc<Mutex<HashMap<_, _>>> = Arc::new(Mutex::new(
         //     n.iter()
         //         .map(|node_name| {
@@ -393,42 +393,41 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         if nodes.get(&node).unwrap().prevs.is_empty() {
             deps.push(async { Arc::new(FlowResult::new()) }.boxed().shared());
         } else {
-            for prev in nodes.get(&node).unwrap().prevs.iter() {
-                let prev_ptr = Arc::new(prev);
-                let dag_futures_ptr = Arc::clone(&dag_futures);
-                let have_handled_ptr = Arc::clone(&have_handled);
-                let nodes_ptr = Arc::clone(&nodes);
-                let pre_ptr = Arc::clone(&pre_fn);
-                let post_ptr = Arc::clone(&post_fn);
-                let timeout_cb_ptr = Arc::clone(&timeout_cb_fn);
-                let failure_cb_ptr = Arc::clone(&failure_cb_fn);
-                let node_mapping_ptr = Arc::clone(&node_mapping);
-                let arg_ptr = Arc::clone(&args);
-                let cached_repo_ptr = Arc::clone(&cached_repo);
-
-                if !have_handled.lock().unwrap().contains(&prev.to_string()) {
+            deps = nodes
+                .get(&node)
+                .unwrap()
+                .prevs
+                .iter()
+                .filter(|prev| !have_handled.lock().unwrap().contains(&prev.to_string()))
+                .map(|prev| {
+                    let prev_ptr = Arc::new(prev);
                     dag_futures.lock().unwrap().insert(
                         prev.to_string(),
                         Flow::<T, E>::dfs_node(
-                            dag_futures_ptr,
-                            have_handled_ptr,
-                            nodes_ptr,
+                            Arc::clone(&dag_futures),
+                            Arc::clone(&have_handled),
+                            Arc::clone(&nodes),
                             prev_ptr.to_string(),
-                            pre_ptr,
-                            post_ptr,
-                            timeout_cb_ptr,
-                            failure_cb_ptr,
-                            node_mapping_ptr,
-                            arg_ptr,
-                            cached_repo_ptr,
+                            Arc::clone(&pre_fn),
+                            Arc::clone(&post_fn),
+                            Arc::clone(&timeout_cb_fn),
+                            Arc::clone(&failure_cb_fn),
+                            Arc::clone(&node_mapping),
+                            Arc::clone(&args),
+                            Arc::clone(&cached_repo),
                         )
                         .boxed()
                         .shared(),
                     );
                     have_handled.lock().unwrap().insert(prev_ptr.to_string());
-                }
-                deps.push(dag_futures.lock().unwrap().get(prev).unwrap().clone());
-            }
+                    dag_futures.lock().unwrap().get(prev).unwrap().clone()
+                })
+                .collect();
+        }
+
+        let mut results = Vec::with_capacity(deps.len());
+        while let Some(item) = deps.next().await {
+            results.push(item);
         }
 
         let params_ptr = &nodes.get(&node).unwrap().node_config.params;
@@ -438,11 +437,6 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                 .unwrap(),
         );
         let arg_ptr = Arc::clone(&args);
-
-        let mut results = Vec::with_capacity(deps.len());
-        while let Some(item) = deps.next().await {
-            results.push(item);
-        }
 
         let prev_res = Arc::new(results.iter().fold(FlowResult::new(), |a, b| a.merge(b))); //TODO: process
         let pre_result: T = pre_fn(&arg_ptr, &prev_res);
