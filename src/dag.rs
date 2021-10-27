@@ -12,7 +12,7 @@ use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{SystemTime};
 
 #[derive(Clone, Debug)]
 pub enum FlowResult {
@@ -477,6 +477,10 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         };
 
         post_fn(&arg_ptr, &prev_res, &pre_result);
-        res
+        if res.is_err() && nodes.get(&node).unwrap().node_config.necessary {
+            res
+        } else {
+            Arc::new(FlowResult::new())
+        }
     }
 }
