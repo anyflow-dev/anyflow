@@ -1,19 +1,18 @@
 use async_recursion::async_recursion;
-
 use futures::future::FutureExt;
 use futures::future::Shared;
-
 use futures::StreamExt;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::any::Any;
-
 use async_std;
+use dashmap::DashMap;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use std::time::{SystemTime};
 
 #[derive(Clone, Debug)]
 pub enum FlowResult {
@@ -23,6 +22,12 @@ pub enum FlowResult {
 
 unsafe impl Send for FlowResult {}
 unsafe impl Sync for FlowResult {}
+
+impl Default for FlowResult {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl FlowResult {
     pub fn new() -> FlowResult {
@@ -122,8 +127,8 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
 
     // global configures
     timeout: Duration,
-    pre: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a FlowResult) -> T + Send + Sync>,
-    post: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a FlowResult, &T) + Send + Sync>,
+    pre: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a Arc<FlowResult>) -> T + Send + Sync>,
+    post: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a Arc<FlowResult>, &T) + Send + Sync>,
     timeout_cb: Arc<dyn for<'b> Fn(Arc<DAGNode>, &'b FlowResult) + Send + Sync>,
     failure_cb: Arc<dyn for<'a> Fn(Arc<DAGNode>, &'a FlowResult, &'a FlowResult) + Send + Sync>,
 
@@ -136,6 +141,15 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
                 + Send,
         >,
     >,
+
+    // cache
+    cached_repo: Arc<dashmap::DashMap<String, (Arc<FlowResult>, SystemTime)>>,
+}
+
+impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Default for Flow<T, E> {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
@@ -148,6 +162,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             timeout_cb: Arc::new(|_, _| {}),    // placeholder
             failure_cb: Arc::new(|_, _, _| {}), // placeholder
             node_mapping: HashMap::new(),
+            cached_repo: Arc::new(DashMap::new()),
         }
     }
 
@@ -209,10 +224,40 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             }
         }
 
+        let root_nodes: HashSet<String> = self
+            .nodes
+            .values()
+            .filter(|node| node.prevs.is_empty())
+            .map(|node| node.node_config.name.clone())
+            .collect();
+        for root in root_nodes {
+            if !self.check_flow(&mut HashSet::new(), root.to_string()) {
+                return Err(("have cycle").to_string());
+            }
+        }
+
         Ok(())
     }
 
-    pub async fn make_flow(&self, args: Arc<E>) -> Vec<FlowResult> {
+    fn check_flow<'a>(&self, path: &mut HashSet<String>, cur: String) -> bool {
+        if path.contains(&cur) {
+            return false;
+        }
+        let node = self.nodes.get(&cur).unwrap();
+        if node.nexts.is_empty() {
+            return true;
+        }
+
+        path.insert(cur);
+        for next in &node.nexts {
+            if !self.check_flow(path, next.to_string()) {
+                return false;
+            }
+        }
+        true
+    }
+
+    pub async fn make_flow(&self, args: Arc<E>) -> Vec<Arc<FlowResult>> {
         let leaf_nodes: HashSet<String> = self
             .nodes
             .values()
@@ -263,7 +308,9 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             Mutex<
                 HashMap<
                     std::string::String,
-                    Shared<Pin<Box<dyn futures::Future<Output = FlowResult> + std::marker::Send>>>,
+                    Shared<
+                        Pin<Box<dyn futures::Future<Output = Arc<FlowResult>> + std::marker::Send>>,
+                    >,
                 >,
             >,
         > = Arc::new(Mutex::new(HashMap::new()));
@@ -288,6 +335,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                             .collect(),
                     ),
                     Arc::clone(&args),
+                    Arc::clone(&self.cached_repo),
                 )
                 .boxed()
                 .shared(),
@@ -313,15 +361,17 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             Mutex<
                 HashMap<
                     std::string::String,
-                    Shared<Pin<Box<dyn futures::Future<Output = FlowResult> + std::marker::Send>>>,
+                    Shared<
+                        Pin<Box<dyn futures::Future<Output = Arc<FlowResult>> + std::marker::Send>>,
+                    >,
                 >,
             >,
         >,
         have_handled: Arc<Mutex<HashSet<String>>>,
         nodes: Arc<HashMap<String, Arc<DAGNode>>>,
         node: String,
-        pre_fn: Arc<dyn for<'b> Fn(&'b Arc<E>, &'b FlowResult) -> T + Send + Sync>,
-        post_fn: Arc<dyn for<'b> Fn(&'b Arc<E>, &'b FlowResult, &T) + Send + Sync>,
+        pre_fn: Arc<dyn for<'b> Fn(&'b Arc<E>, &'b Arc<FlowResult>) -> T + Send + Sync>,
+        post_fn: Arc<dyn for<'b> Fn(&'b Arc<E>, &'b Arc<FlowResult>, &T) + Send + Sync>,
         timeout_cb_fn: Arc<dyn for<'b> Fn(Arc<DAGNode>, &'b FlowResult) + Send + Sync>,
         failure_cb_fn: Arc<
             dyn for<'b> Fn(Arc<DAGNode>, &'b FlowResult, &'b FlowResult) + Send + Sync,
@@ -337,10 +387,11 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             >,
         >,
         args: Arc<E>,
-    ) -> FlowResult {
+        cached_repo: Arc<dashmap::DashMap<String, (Arc<FlowResult>, SystemTime)>>,
+    ) -> Arc<FlowResult> {
         let mut deps = futures::stream::FuturesUnordered::new();
         if nodes.get(&node).unwrap().prevs.is_empty() {
-            deps.push(async { FlowResult::new() }.boxed().shared());
+            deps.push(async { Arc::new(FlowResult::new()) }.boxed().shared());
         } else {
             for prev in nodes.get(&node).unwrap().prevs.iter() {
                 let prev_ptr = Arc::new(prev);
@@ -353,6 +404,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                 let failure_cb_ptr = Arc::clone(&failure_cb_fn);
                 let node_mapping_ptr = Arc::clone(&node_mapping);
                 let arg_ptr = Arc::clone(&args);
+                let cached_repo_ptr = Arc::clone(&cached_repo);
 
                 if !have_handled.lock().unwrap().contains(&prev.to_string()) {
                     dag_futures.lock().unwrap().insert(
@@ -368,6 +420,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                             failure_cb_ptr,
                             node_mapping_ptr,
                             arg_ptr,
+                            cached_repo_ptr,
                         )
                         .boxed()
                         .shared(),
@@ -393,21 +446,41 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
 
         let prev_res = Arc::new(results.iter().fold(FlowResult::new(), |a, b| a.merge(b))); //TODO: process
         let pre_result: T = pre_fn(&arg_ptr, &prev_res);
-        let res = match async_std::future::timeout(Duration::from_secs(10), async {
-            handle_fn(&arg_ptr, Arc::clone(&prev_res), params_ptr)
-        })
-        .await
+
+        let now = SystemTime::now();
+        let res = if nodes.get(&node).unwrap().node_config.cachable
+            && cached_repo.contains_key(&node)
+            && now
+                .duration_since(cached_repo.get(&node).unwrap().1)
+                .unwrap()
+                > Duration::from_secs(60)
         {
-            Err(_) => {
-                timeout_cb_fn(Arc::clone(nodes.get(&node).unwrap()), &prev_res);
-                FlowResult::Err("timeout")
+            Arc::clone(&cached_repo.get(&node).unwrap().0)
+        } else {
+            let r = match async_std::future::timeout(Duration::from_secs(10), async {
+                handle_fn(&arg_ptr, Arc::clone(&prev_res), params_ptr)
+            })
+            .await
+            {
+                Err(_) => {
+                    timeout_cb_fn(Arc::clone(nodes.get(&node).unwrap()), &prev_res);
+                    Arc::new(FlowResult::Err("timeout"))
+                }
+                Ok(val) => Arc::new(val),
+            };
+            if r.is_err() {
+                failure_cb_fn(Arc::clone(nodes.get(&node).unwrap()), &prev_res, &r);
+            } else if nodes.get(&node).unwrap().node_config.cachable {
+                cached_repo.insert(node.clone(), (Arc::clone(&r), SystemTime::now()));
             }
-            Ok(val) => val,
+            r
         };
-        if res.is_err() {
-            failure_cb_fn(Arc::clone(nodes.get(&node).unwrap()), &prev_res, &res);
-        }
+
         post_fn(&arg_ptr, &prev_res, &pre_result);
-        res
+        if res.is_err() && nodes.get(&node).unwrap().node_config.necessary {
+            res
+        } else {
+            Arc::new(FlowResult::new())
+        }
     }
 }
