@@ -478,3 +478,52 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         }
     }
 }
+
+#[derive(Default)]
+struct B {}
+
+struct A {
+    c: HashMap<String, Arc<dyn Fn(Arc<B>) -> Pin<Box<std::future::Future<Output = i32>>>>>,
+    d: HashMap<String, Arc<dyn Fn(Arc<B>) -> Arc<Arc<i32>> + Sync + Send>>,
+    p: dyn Fn(Arc<B>) -> dyn std::future::Future<Output = i32>,
+}
+
+impl A {
+    async fn f(&self) {
+        let b = Arc::new(B::default());
+        // (self.p)(b);
+        let a = (self.c.get("xxx")).unwrap()(b);
+        A::p(Arc::new(a.await));
+        // let p = (self.d.get("xxx")).unwrap()(b);
+        // A::p(p);
+    }
+
+    fn p(p: Arc<i32>) {}
+}
+
+async fn foo(x: u8) -> u8 {
+    2 * x
+}
+
+struct S<C, F>
+where
+    C: Fn(u8) -> F,
+    F: std::future::Future,
+{
+    foo: C,
+}
+
+impl<C, F> S<C, F>
+where
+    C: Fn(u8) -> F,
+    F: std::future::Future,
+{
+    async fn do_thing(self) {
+        (self.foo)(42).await;
+    }
+}
+
+async fn example() {
+    let s = S { foo };
+    s.do_thing().await;
+}
