@@ -1,13 +1,11 @@
-
+use async_std::task;
+use futures::future::FutureExt;
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
-
-
 use std::fs;
 use std::fs::File;
+use std::pin::Pin;
 use std::sync::Arc;
-
-use async_std::task;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Val {
@@ -15,6 +13,23 @@ struct Val {
 }
 
 fn calc<'a, E: Send + Sync>(
+    _graph_args: &'a Arc<E>,
+    input: Arc<anyflow::FlowResult>,
+    params: &'a Box<RawValue>,
+) -> anyflow::FlowResult {
+    let p: Val = serde_json::from_str(params.get()).unwrap();
+
+    let val: i32 = match input.get::<i32>("res") {
+        Ok(val) => *val,
+        Err(_e) => 0,
+    };
+    // println!("params {:?} {:?}", p, val);
+    let mut r = anyflow::FlowResult::new();
+    r.set("res", val + p.val);
+    r
+}
+
+async fn async_calc<'a, E: Send + Sync>(
     _graph_args: &'a Arc<E>,
     input: Arc<anyflow::FlowResult>,
     params: &'a Box<RawValue>,
@@ -53,8 +68,6 @@ fn smol_main() {
     };
 }
 
-
-
 fn tokio_main() {
     let guard = pprof::ProfilerGuard::new(100).unwrap();
 
@@ -87,6 +100,7 @@ fn async_std_main() {
     let data = fs::read_to_string("dag.json").expect("Unable to read file");
     println!("{:?}", dag.init(&data));
     dag.register("calc", Arc::new(calc));
+    // dag.async_register("async_calc", Arc::new(async_calc));
     for _i in 0..1000 {
         let my_dag = dag.make_flow(Arc::new(1));
         task::block_on(my_dag);

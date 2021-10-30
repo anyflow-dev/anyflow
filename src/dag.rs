@@ -1,18 +1,24 @@
 use async_recursion::async_recursion;
 use async_std;
+use async_trait::async_trait;
 use dashmap::DashMap;
 use futures::future::FutureExt;
 use futures::future::Shared;
+use futures::Future;
 use futures::StreamExt;
+use pin_project::pin_project;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::marker::PhantomData;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 use std::time::Duration;
 use std::time::SystemTime;
+use tower_service::Service;
 
 #[derive(Clone, Debug)]
 pub enum FlowResult {
@@ -142,6 +148,19 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
         >,
     >,
 
+    async_node_mapping: HashMap<
+        String,
+        Arc<
+            dyn for<'a> Fn(
+                    &'a Arc<E>,
+                    Arc<FlowResult>,
+                    &'a Box<RawValue>,
+                ) -> Pin<Box<std::future::Future<Output = FlowResult>>>
+                + Sync
+                + Send,
+        >,
+    >,
+
     // cache
     cached_repo: Arc<dashmap::DashMap<String, (Arc<FlowResult>, SystemTime)>>,
 }
@@ -162,6 +181,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             timeout_cb: Arc::new(|_, _| {}),    // placeholder
             failure_cb: Arc::new(|_, _, _| {}), // placeholder
             node_mapping: HashMap::new(),
+            async_node_mapping: HashMap::new(),
             cached_repo: Arc::new(DashMap::new()),
         }
     }
@@ -176,6 +196,23 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         >,
     ) {
         self.node_mapping
+            .insert(node_name.to_string(), Arc::clone(&handle));
+    }
+
+    pub fn async_register(
+        &mut self,
+        node_name: &str,
+        handle: Arc<
+            dyn for<'a> Fn(
+                    &'a Arc<E>,
+                    Arc<FlowResult>,
+                    &'a Box<RawValue>,
+                ) -> Pin<Box<std::future::Future<Output = FlowResult>>>
+                + Sync
+                + Send,
+        >,
+    ) {
+        self.async_node_mapping
             .insert(node_name.to_string(), Arc::clone(&handle));
     }
 
@@ -479,13 +516,83 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
     }
 }
 
+#[async_trait]
+pub trait Handler<B, T>: Clone + Send + Sized + 'static {
+    async fn call(self, req: i32) -> i32;
+}
+
+#[async_trait]
+impl<F, Fut, B> Handler<B, i32> for F
+where
+    F: FnOnce(i32) -> Fut + Clone + Send + Sync + 'static,
+    Fut: Future<Output = i32> + Send,
+    B: Send + 'static,
+{
+    async fn call(self, req: i32) -> i32 {
+        self(req).await
+    }
+}
+
+struct AsyncContainer<B> {
+    handler: B,
+}
+
+impl<B> Service<i32> for AsyncContainer<B> {
+    type Response = i32;
+    type Error = &'static str;
+    type Future = Pin<Box<dyn Future<Output = Result<i32, &'static str>>>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, req: i32) -> Self::Future {
+        // create a response in a future.
+        let fut = async { Ok(5) };
+
+        // Return the response as an immediate future
+        Box::pin(fut)
+    }
+}
+
+fn get<H, B, T>(handler: H)
+where
+    H: Handler<B, T>,
+{
+}
+
+async fn d(r: i32) -> i32 {
+    5
+}
+
+fn demo() {
+    get::<_, i32, _>(d);
+}
+
 #[derive(Default)]
 struct B {}
 
 struct A {
-    c: HashMap<String, Arc<dyn Fn(Arc<B>) -> Pin<Box<std::future::Future<Output = i32>>>>>,
+    c: HashMap<String, Arc<Fn(Arc<B>) -> Pin<Box<std::future::Future<Output = i32>>>>>,
+    q: HashMap<String, Arc<Fn(Arc<B>) -> std::future::Future<Output = i32>>>,
     d: HashMap<String, Arc<dyn Fn(Arc<B>) -> Arc<Arc<i32>> + Sync + Send>>,
-    p: dyn Fn(Arc<B>) -> dyn std::future::Future<Output = i32>,
+    // w: dyn Fn(Arc<B>) -> dyn std::future::Future<Output = i32>
+    // p: dyn Fn(Arc<B>) -> dyn std::future::Future<Output = i32>,
+    // y: dyn Fn(Arc<B>) -> dyn futures::Future<Output = i32>,
+    // p: Box<dyn Fn(Arc<B>) -> dyn Handler>,
+    t: HashMap<
+        String,
+        Arc<
+        Mutex<
+            dyn Service<
+                    i32,
+                    Response = i32,
+                    Error = &'static str,
+                    Future = Pin<Box<dyn Future<Output = Result<i32, &'static str>>>>,
+                >,
+                >
+        >,
+    >,
 }
 
 impl A {
@@ -493,9 +600,15 @@ impl A {
         let b = Arc::new(B::default());
         // (self.p)(b);
         let a = (self.c.get("xxx")).unwrap()(b);
+        // let a = (self.q.get("xxx")).unwrap()(b);
         A::p(Arc::new(a.await));
+        // (*self.y)(b).boxed();
+        // let i = (self.p)(b);
         // let p = (self.d.get("xxx")).unwrap()(b);
         // A::p(p);
+        let o = (self.t.get("xxx")).unwrap().lock().unwrap().call(6);
+        // let a = (self.q.get("xxx")).unwrap()(b);
+        A::p(Arc::new(o.await.unwrap()));
     }
 
     fn p(p: Arc<i32>) {}

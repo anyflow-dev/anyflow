@@ -13,3 +13,5 @@ tokio = {version = "1.12.0", features = ["full"] }
 smol = {version = "1.2.5"}
 pprof = { version = "0.6.0", features = ["flamegraph"] }
 regex = "1"
+async-std = {version="1"}
+futures = { version = "0.3.17" }
