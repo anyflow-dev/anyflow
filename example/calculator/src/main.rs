@@ -29,10 +29,10 @@ fn calc<'a, E: Send + Sync>(
     r
 }
 
-async fn async_calc<'a, E: Send + Sync>(
-    _graph_args: &'a Arc<E>,
+async fn async_calc<E: Send + Sync>(
+    _graph_args: Arc<E>,
     input: Arc<anyflow::FlowResult>,
-    params: &'a Box<RawValue>,
+    params: Box<RawValue>,
 ) -> anyflow::FlowResult {
     let p: Val = serde_json::from_str(params.get()).unwrap();
 
@@ -40,7 +40,7 @@ async fn async_calc<'a, E: Send + Sync>(
         Ok(val) => *val,
         Err(_e) => 0,
     };
-    // println!("params {:?} {:?}", p, val);
+    println!("params {:?} {:?}", p, val);
     let mut r = anyflow::FlowResult::new();
     r.set("res", val + p.val);
     r
@@ -100,6 +100,7 @@ fn async_std_main() {
     let data = fs::read_to_string("dag.json").expect("Unable to read file");
     println!("{:?}", dag.init(&data));
     dag.register("calc", Arc::new(calc));
+    dag.async_register("calc", async_calc);
     // dag.async_register("async_calc", Arc::new(async_calc));
     for _i in 0..1000 {
         let my_dag = dag.make_flow(Arc::new(1));

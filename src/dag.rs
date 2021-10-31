@@ -2,11 +2,11 @@ use async_recursion::async_recursion;
 use async_std;
 use async_trait::async_trait;
 use dashmap::DashMap;
-use futures::future::BoxFuture;
 use futures::future::FutureExt;
 use futures::future::Shared;
 use futures::Future;
 use futures::StreamExt;
+use futures::{future::BoxFuture, ready};
 use pin_project::pin_project;
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -206,10 +206,10 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
     where
         H: AsyncHandler<E>,
     {
-        // self.async_node_mapping.insert(
-        //     node_name.to_string(),
-        //     Arc::new(Mutex::new(Flow::<T, E>::wrap(handler))),
-        // );
+        self.async_node_mapping.insert(
+            node_name.to_string(),
+            Arc::new(Mutex::new(Flow::<T, E>::wrap(handler))),
+        );
     }
 
     fn wrap<H>(handler: H) -> AsyncContainer<H>
@@ -509,7 +509,6 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         let prev_res = Arc::new(results.iter().fold(FlowResult::new(), |a, b| a.merge(b))); //TODO: process
         let pre_result: T = pre_fn(&arg_ptr, &prev_res);
 
-
         // let u = async {
         //     Result::<FlowResult, &'static str>::Ok(FlowResult::new())
         // }.boxed().await;
@@ -526,6 +525,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             Arc::clone(&cached_repo.get(&node).unwrap().0)
         } else {
             let r = match async_std::future::timeout(Duration::from_secs(10), async {
+                // println!("oooququ");
                 let v = async_handle_fn.lock().unwrap().call((
                     Arc::clone(&arg_ptr),
                     Arc::clone(&prev_res),
@@ -599,15 +599,8 @@ where
     }
 
     fn call(&mut self, q: (Arc<E>, Arc<FlowResult>, Box<RawValue>)) -> Self::Future {
-        // create a response in a future.
-        // let fut = async { Ok(FlowResult::new()) };
-        // self.handler.call(req);
         let ft = AsyncHandler::call(self.handler.clone(), q.0, q.1, q.2);
-
-        // Return the response as an immediate future
-        AsyncHandlerFuture{
-            inner: ft
-        }
+        AsyncHandlerFuture { inner: ft }
     }
 }
 
@@ -637,7 +630,9 @@ impl Future for AsyncHandlerFuture {
     type Output = Result<FlowResult, &'static str>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Poll::Ready(Ok(FlowResult::new()))
+        let this = self.project();
+        let cur = ready!(this.inner.poll(cx));
+        Poll::Ready(Ok(cur))
     }
 }
 
