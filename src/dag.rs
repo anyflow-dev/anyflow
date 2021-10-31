@@ -2,6 +2,7 @@ use async_recursion::async_recursion;
 use async_std;
 use async_trait::async_trait;
 use dashmap::DashMap;
+use futures::future::BoxFuture;
 use futures::future::FutureExt;
 use futures::future::Shared;
 use futures::Future;
@@ -153,11 +154,12 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
         Arc<
             Mutex<
                 dyn Service<
-                    (Arc<E>, Arc<FlowResult>, Box<RawValue>),
-                    Response = FlowResult,
-                    Error = &'static str,
-                    Future = Pin<Box<dyn Future<Output = Result<FlowResult, &'static str>>>>,
-                >,
+                        (Arc<E>, Arc<FlowResult>, Box<RawValue>),
+                        Response = FlowResult,
+                        Error = &'static str,
+                        Future = AsyncHandlerFuture,
+                    > + Send
+                    + Sync,
             >,
         >,
     >,
@@ -204,10 +206,10 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
     where
         H: AsyncHandler<E>,
     {
-        self.async_node_mapping.insert(
-            node_name.to_string(),
-            Arc::new(Mutex::new(Flow::<T, E>::wrap(handler))),
-        );
+        // self.async_node_mapping.insert(
+        //     node_name.to_string(),
+        //     Arc::new(Mutex::new(Flow::<T, E>::wrap(handler))),
+        // );
     }
 
     fn wrap<H>(handler: H) -> AsyncContainer<H>
@@ -372,6 +374,12 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                             .map(|(key, val)| (key.clone(), Arc::clone(val)))
                             .collect(),
                     ),
+                    Arc::new(
+                        self.async_node_mapping
+                            .iter()
+                            .map(|(key, val)| (key.clone(), Arc::clone(val)))
+                            .collect(),
+                    ),
                     Arc::clone(&args),
                     Arc::clone(&self.cached_repo),
                 )
@@ -424,6 +432,22 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                 >,
             >,
         >,
+        async_node_mapping: Arc<
+            HashMap<
+                String,
+                Arc<
+                    Mutex<
+                        dyn Service<
+                                (Arc<E>, Arc<FlowResult>, Box<RawValue>),
+                                Response = FlowResult,
+                                Error = &'static str,
+                                Future = AsyncHandlerFuture,
+                            > + Send
+                            + Sync,
+                    >,
+                >,
+            >,
+        >,
         args: Arc<E>,
         cached_repo: Arc<dashmap::DashMap<String, (Arc<FlowResult>, SystemTime)>>,
     ) -> Arc<FlowResult> {
@@ -451,6 +475,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                             Arc::clone(&timeout_cb_fn),
                             Arc::clone(&failure_cb_fn),
                             Arc::clone(&node_mapping),
+                            Arc::clone(&async_node_mapping),
                             Arc::clone(&args),
                             Arc::clone(&cached_repo),
                         )
@@ -474,10 +499,21 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                 .get(&nodes.get(&node).unwrap().node_config.node)
                 .unwrap(),
         );
+        let async_handle_fn = Arc::clone(
+            async_node_mapping
+                .get(&nodes.get(&node).unwrap().node_config.node)
+                .unwrap(),
+        );
         let arg_ptr = Arc::clone(&args);
 
         let prev_res = Arc::new(results.iter().fold(FlowResult::new(), |a, b| a.merge(b))); //TODO: process
         let pre_result: T = pre_fn(&arg_ptr, &prev_res);
+
+
+        // let u = async {
+        //     Result::<FlowResult, &'static str>::Ok(FlowResult::new())
+        // }.boxed().await;
+        // pp(u);
 
         let now = SystemTime::now();
         let res = if nodes.get(&node).unwrap().node_config.cachable
@@ -490,12 +526,19 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             Arc::clone(&cached_repo.get(&node).unwrap().0)
         } else {
             let r = match async_std::future::timeout(Duration::from_secs(10), async {
-                handle_fn(&arg_ptr, Arc::clone(&prev_res), params_ptr)
+                let v = async_handle_fn.lock().unwrap().call((
+                    Arc::clone(&arg_ptr),
+                    Arc::clone(&prev_res),
+                    params_ptr.clone(),
+                ));
+                v.await.unwrap()
+                // handle_fn(&arg_ptr, Arc::clone(&prev_res), params_ptr)
             })
             .await
             {
                 Err(_) => {
                     timeout_cb_fn(Arc::clone(nodes.get(&node).unwrap()), &prev_res);
+
                     Arc::new(FlowResult::Err("timeout"))
                 }
                 Ok(val) => Arc::new(val),
@@ -518,7 +561,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
 }
 
 #[async_trait]
-pub trait AsyncHandler<E>: Clone + Send + Sized + 'static {
+pub trait AsyncHandler<E>: Clone + Sync + Send + Sized + 'static {
     async fn call(self, q: Arc<E>, w: Arc<FlowResult>, e: Box<RawValue>) -> FlowResult;
 }
 
@@ -540,13 +583,16 @@ struct AsyncContainer<B> {
     // _marker: PhantomData,
 }
 
+unsafe impl<B> Send for AsyncContainer<B> {}
+unsafe impl<B> Sync for AsyncContainer<B> {}
+
 impl<B, E> Service<(Arc<E>, Arc<FlowResult>, Box<RawValue>)> for AsyncContainer<B>
 where
     B: AsyncHandler<E>,
 {
     type Response = FlowResult;
     type Error = &'static str;
-    type Future = Pin<Box<dyn Future<Output = Result<FlowResult, &'static str>>>>;
+    type Future = AsyncHandlerFuture;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
@@ -554,12 +600,14 @@ where
 
     fn call(&mut self, q: (Arc<E>, Arc<FlowResult>, Box<RawValue>)) -> Self::Future {
         // create a response in a future.
-        let fut = async { Ok(FlowResult::new()) };
+        // let fut = async { Ok(FlowResult::new()) };
         // self.handler.call(req);
         let ft = AsyncHandler::call(self.handler.clone(), q.0, q.1, q.2);
 
         // Return the response as an immediate future
-        Box::pin(fut)
+        AsyncHandlerFuture{
+            inner: ft
+        }
     }
 }
 
@@ -578,6 +626,22 @@ where
         self(req).await
     }
 }
+
+#[pin_project]
+pub struct AsyncHandlerFuture {
+    #[pin]
+    inner: BoxFuture<'static, FlowResult>,
+}
+
+impl Future for AsyncHandlerFuture {
+    type Output = Result<FlowResult, &'static str>;
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        Poll::Ready(Ok(FlowResult::new()))
+    }
+}
+
+fn pp(p: FlowResult) {}
 
 // struct AsyncContainer<B> {
 //     handler: B,
