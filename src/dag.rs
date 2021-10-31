@@ -517,16 +517,15 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
 }
 
 #[async_trait]
-pub trait Handler<B, T>: Clone + Send + Sized + 'static {
+pub trait Handler: Clone + Send + Sized + 'static {
     async fn call(self, req: i32) -> i32;
 }
 
 #[async_trait]
-impl<F, Fut, B> Handler<B, i32> for F
+impl<F, Fut> Handler for F
 where
     F: FnOnce(i32) -> Fut + Clone + Send + Sync + 'static,
     Fut: Future<Output = i32> + Send,
-    B: Send + 'static,
 {
     async fn call(self, req: i32) -> i32 {
         self(req).await
@@ -535,9 +534,26 @@ where
 
 struct AsyncContainer<B> {
     handler: B,
+    // _marker: PhantomData,
 }
 
-impl<B> Service<i32> for AsyncContainer<B> {
+impl<B> Clone for AsyncContainer<B>
+where
+    B: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            handler: self.handler.clone(),
+        }
+    }
+}
+
+impl<B> Copy for AsyncContainer<B> where B: Copy {}
+
+impl<B> Service<i32> for AsyncContainer<B>
+where
+    B: Handler,
+{
     type Response = i32;
     type Error = &'static str;
     type Future = Pin<Box<dyn Future<Output = Result<i32, &'static str>>>>;
@@ -549,15 +565,17 @@ impl<B> Service<i32> for AsyncContainer<B> {
     fn call(&mut self, req: i32) -> Self::Future {
         // create a response in a future.
         let fut = async { Ok(5) };
+        // self.handler.call(req);
+        let ft = Handler::call(self.handler.clone(), req);
 
         // Return the response as an immediate future
         Box::pin(fut)
     }
 }
 
-fn get<H, B, T>(handler: H)
+fn get<H>(handler: H)
 where
-    H: Handler<B, T>,
+    H: Handler,
 {
 }
 
@@ -566,7 +584,7 @@ async fn d(r: i32) -> i32 {
 }
 
 fn demo() {
-    get::<_, i32, _>(d);
+    get::<_>(d);
 }
 
 #[derive(Default)]
@@ -583,14 +601,14 @@ struct A {
     t: HashMap<
         String,
         Arc<
-        Mutex<
-            dyn Service<
+            Mutex<
+                dyn Service<
                     i32,
                     Response = i32,
                     Error = &'static str,
                     Future = Pin<Box<dyn Future<Output = Result<i32, &'static str>>>>,
                 >,
-                >
+            >,
         >,
     >,
 }
