@@ -151,13 +151,14 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
     async_node_mapping: HashMap<
         String,
         Arc<
-            dyn for<'a> Fn(
-                    &'a Arc<E>,
-                    Arc<FlowResult>,
-                    &'a Box<RawValue>,
-                ) -> Pin<Box<std::future::Future<Output = FlowResult>>>
-                + Sync
-                + Send,
+            Mutex<
+                dyn Service<
+                    (Arc<E>, Arc<FlowResult>, Box<RawValue>),
+                    Response = FlowResult,
+                    Error = &'static str,
+                    Future = Pin<Box<dyn Future<Output = Result<FlowResult, &'static str>>>>,
+                >,
+            >,
         >,
     >,
 
@@ -199,21 +200,21 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             .insert(node_name.to_string(), Arc::clone(&handle));
     }
 
-    pub fn async_register(
-        &mut self,
-        node_name: &str,
-        handle: Arc<
-            dyn for<'a> Fn(
-                    &'a Arc<E>,
-                    Arc<FlowResult>,
-                    &'a Box<RawValue>,
-                ) -> Pin<Box<std::future::Future<Output = FlowResult>>>
-                + Sync
-                + Send,
-        >,
-    ) {
-        self.async_node_mapping
-            .insert(node_name.to_string(), Arc::clone(&handle));
+    pub fn async_register<H>(&mut self, node_name: &str, handler: H)
+    where
+        H: AsyncHandler<E>,
+    {
+        self.async_node_mapping.insert(
+            node_name.to_string(),
+            Arc::new(Mutex::new(Flow::<T, E>::wrap(handler))),
+        );
+    }
+
+    fn wrap<H>(handler: H) -> AsyncContainer<H>
+    where
+        H: AsyncHandler<E>,
+    {
+        AsyncContainer { handler: handler }
     }
 
     pub fn registers(
@@ -517,6 +518,52 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
 }
 
 #[async_trait]
+pub trait AsyncHandler<E>: Clone + Send + Sized + 'static {
+    async fn call(self, q: Arc<E>, w: Arc<FlowResult>, e: Box<RawValue>) -> FlowResult;
+}
+
+#[async_trait]
+impl<F, Fut, E> AsyncHandler<E> for F
+where
+    F: FnOnce(Arc<E>, Arc<FlowResult>, Box<RawValue>) -> Fut + Clone + Send + Sync + 'static,
+    Fut: Future<Output = FlowResult> + Send,
+    E: Send + Sync + 'static,
+{
+    async fn call(self, q: Arc<E>, w: Arc<FlowResult>, e: Box<RawValue>) -> FlowResult {
+        self(q, w, e).await
+    }
+}
+
+#[derive(Clone, Copy)]
+struct AsyncContainer<B> {
+    handler: B,
+    // _marker: PhantomData,
+}
+
+impl<B, E> Service<(Arc<E>, Arc<FlowResult>, Box<RawValue>)> for AsyncContainer<B>
+where
+    B: AsyncHandler<E>,
+{
+    type Response = FlowResult;
+    type Error = &'static str;
+    type Future = Pin<Box<dyn Future<Output = Result<FlowResult, &'static str>>>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        Poll::Ready(Ok(()))
+    }
+
+    fn call(&mut self, q: (Arc<E>, Arc<FlowResult>, Box<RawValue>)) -> Self::Future {
+        // create a response in a future.
+        let fut = async { Ok(FlowResult::new()) };
+        // self.handler.call(req);
+        let ft = AsyncHandler::call(self.handler.clone(), q.0, q.1, q.2);
+
+        // Return the response as an immediate future
+        Box::pin(fut)
+    }
+}
+
+#[async_trait]
 pub trait Handler: Clone + Send + Sized + 'static {
     async fn call(self, req: i32) -> i32;
 }
@@ -532,46 +579,46 @@ where
     }
 }
 
-struct AsyncContainer<B> {
-    handler: B,
-    // _marker: PhantomData,
-}
+// struct AsyncContainer<B> {
+//     handler: B,
+//     // _marker: PhantomData,
+// }
 
-impl<B> Clone for AsyncContainer<B>
-where
-    B: Clone,
-{
-    fn clone(&self) -> Self {
-        Self {
-            handler: self.handler.clone(),
-        }
-    }
-}
+// impl<B> Clone for AsyncContainer<B>
+// where
+//     B: Clone,
+// {
+//     fn clone(&self) -> Self {
+//         Self {
+//             handler: self.handler.clone(),
+//         }
+//     }
+// }
 
-impl<B> Copy for AsyncContainer<B> where B: Copy {}
+// impl<B> Copy for AsyncContainer<B> where B: Copy {}
 
-impl<B> Service<i32> for AsyncContainer<B>
-where
-    B: Handler,
-{
-    type Response = i32;
-    type Error = &'static str;
-    type Future = Pin<Box<dyn Future<Output = Result<i32, &'static str>>>>;
+// impl<B> Service<i32> for AsyncContainer<B>
+// where
+//     B: Handler,
+// {
+//     type Response = i32;
+//     type Error = &'static str;
+//     type Future = Pin<Box<dyn Future<Output = Result<i32, &'static str>>>>;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-        Poll::Ready(Ok(()))
-    }
+//     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+//         Poll::Ready(Ok(()))
+//     }
 
-    fn call(&mut self, req: i32) -> Self::Future {
-        // create a response in a future.
-        let fut = async { Ok(5) };
-        // self.handler.call(req);
-        let ft = Handler::call(self.handler.clone(), req);
+//     fn call(&mut self, req: i32) -> Self::Future {
+//         // create a response in a future.
+//         let fut = async { Ok(5) };
+//         // self.handler.call(req);
+//         let ft = Handler::call(self.handler.clone(), req);
 
-        // Return the response as an immediate future
-        Box::pin(fut)
-    }
-}
+//         // Return the response as an immediate future
+//         Box::pin(fut)
+//     }
+// }
 
 fn get<H>(handler: H)
 where
