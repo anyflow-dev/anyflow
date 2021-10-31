@@ -102,7 +102,7 @@ fn async_std_main() {
     dag.register("calc", Arc::new(calc));
     dag.async_register("calc", async_calc);
     // dag.async_register("async_calc", Arc::new(async_calc));
-    for _i in 0..1000 {
+    for _i in 0..1 {
         let my_dag = dag.make_flow(Arc::new(1));
         task::block_on(my_dag);
     }

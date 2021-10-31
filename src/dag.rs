@@ -525,7 +525,6 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             Arc::clone(&cached_repo.get(&node).unwrap().0)
         } else {
             let r = match async_std::future::timeout(Duration::from_secs(10), async {
-                // println!("oooququ");
                 let v = async_handle_fn.lock().unwrap().call((
                     Arc::clone(&arg_ptr),
                     Arc::clone(&prev_res),
@@ -553,9 +552,9 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
 
         post_fn(&arg_ptr, &prev_res, &pre_result);
         if res.is_err() && nodes.get(&node).unwrap().node_config.necessary {
-            res
-        } else {
             Arc::new(FlowResult::new())
+        } else {
+            res
         }
     }
 }
