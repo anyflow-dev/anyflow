@@ -7,7 +7,8 @@ use std::fs::File;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
-use anyflow::FlowResult;
+// use anyflow::FlowResult;
+use anyflow::dag::NodeResults;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Val {
@@ -16,35 +17,35 @@ struct Val {
 
 fn calc<'a, E: Send + Sync>(
     _graph_args: &'a Arc<E>,
-    input: Arc<anyflow::FlowResult>,
     params: &'a Box<RawValue>,
-) -> anyflow::FlowResult {
+    input: &anyflow::NodeResults,
+) -> anyflow::NodeResult {
     let p: Val = serde_json::from_str(params.get()).unwrap();
 
-    let val: i32 = match input.get::<i32>("res") {
-        Ok(val) => *val,
-        Err(_e) => 0,
-    };
+    // let val: i32 = match input.get::<i32>("res") {
+    //     Ok(val) => *val,
+    //     Err(_e) => 0,
+    // };
     // println!("params {:?} {:?}", p, val);
-    let mut r = anyflow::FlowResult::new();
-    r.set("res", val + p.val);
+    let mut r = anyflow::NodeResult::default();
+    // r.set("res", val + p.val);
     r
 }
 
 async fn async_calc<E: Send + Sync>(
     _graph_args: Arc<E>,
-    input: Arc<anyflow::FlowResult>,
     params: Box<RawValue>,
-) -> anyflow::FlowResult {
+    input: Arc<anyflow::NodeResults>,
+) -> anyflow::NodeResult {
     let p: Val = serde_json::from_str(params.get()).unwrap();
 
-    let val: i32 = match input.get::<i32>("res") {
-        Ok(val) => *val,
-        Err(_e) => 0,
-    };
-    println!("params {:?} {:?}", p, val);
-    let mut r = anyflow::FlowResult::new();
-    r.set("res", val + p.val);
+    // let val: i32 = match input.get::<i32>("res") {
+    //     Ok(val) => *val,
+    //     Err(_e) => 0,
+    // };
+    // println!("params {:?} {:?}", p, val);
+    let mut r = anyflow::NodeResult::default();
+    // r.set("res", val + p.val);
     r
 }
 

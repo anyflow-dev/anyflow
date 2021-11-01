@@ -13,7 +13,7 @@ use serde_json::value::RawValue;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-use std::marker::PhantomData;
+
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
@@ -153,7 +153,7 @@ impl NodeResult {
                 Some(val) => Some(val),
                 None => None,
             },
-            NodeResult::Err(e) => None,
+            NodeResult::Err(_e) => None,
             NodeResult::None => None,
         }
     }
@@ -290,7 +290,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
     where
         H: AsyncHandler<E>,
     {
-        AsyncContainer { handler: handler }
+        AsyncContainer { handler }
     }
 
     pub fn registers(
@@ -570,7 +570,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         }
 
         let params_ptr = &nodes.get(&node).unwrap().node_config.params;
-        let handle_fn = Arc::clone(
+        let _handle_fn = Arc::clone(
             node_mapping
                 .get(&nodes.get(&node).unwrap().node_config.node)
                 .unwrap(),
@@ -669,7 +669,7 @@ where
     type Error = &'static str;
     type Future = AsyncHandlerFuture;
 
-    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+    fn poll_ready(&mut self, _cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         Poll::Ready(Ok(()))
     }
 
@@ -711,7 +711,7 @@ impl Future for AsyncHandlerFuture {
     }
 }
 
-fn pp(p: FlowResult) {}
+fn pp(_p: FlowResult) {}
 
 // struct AsyncContainer<B> {
 //     handler: B,
@@ -754,13 +754,13 @@ fn pp(p: FlowResult) {}
 //     }
 // }
 
-fn get<H>(handler: H)
+fn get<H>(_handler: H)
 where
     H: Handler,
 {
 }
 
-async fn d(r: i32) -> i32 {
+async fn d(_r: i32) -> i32 {
     5
 }
 
@@ -772,8 +772,8 @@ fn demo() {
 struct B {}
 
 struct A {
-    c: HashMap<String, Arc<Fn(Arc<B>) -> Pin<Box<std::future::Future<Output = i32>>>>>,
-    q: HashMap<String, Arc<Fn(Arc<B>) -> std::future::Future<Output = i32>>>,
+    c: HashMap<String, Arc<dyn Fn(Arc<B>) -> Pin<Box<dyn std::future::Future<Output = i32>>>>>,
+    q: HashMap<String, Arc<dyn Fn(Arc<B>) -> dyn std::future::Future<Output = i32>>>,
     d: HashMap<String, Arc<dyn Fn(Arc<B>) -> Arc<Arc<i32>> + Sync + Send>>,
     // w: dyn Fn(Arc<B>) -> dyn std::future::Future<Output = i32>
     // p: dyn Fn(Arc<B>) -> dyn std::future::Future<Output = i32>,
@@ -810,7 +810,7 @@ impl A {
         A::p(Arc::new(o.await.unwrap()));
     }
 
-    fn p(p: Arc<i32>) {}
+    fn p(_p: Arc<i32>) {}
 }
 
 async fn foo(x: u8) -> u8 {
