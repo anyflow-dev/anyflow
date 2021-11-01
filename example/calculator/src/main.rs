@@ -6,6 +6,8 @@ use std::fs;
 use std::fs::File;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::Mutex;
+use anyflow::FlowResult;
 
 #[derive(Serialize, Deserialize, Debug)]
 struct Val {
@@ -119,5 +121,12 @@ fn async_std_main() {
 }
 
 fn main() {
-    async_std_main();
+    // async_std_main();
+    let mut a = anyflow::FlowResult::new();
+    let q: i32 = 5;
+    a.set("ppp", Mutex::new(q));
+    let p = a.get::<Mutex<i32>>("ppp");
+    // let mut u = ;
+    *p.unwrap().lock().unwrap() = 6;
+    println!("{:?}", a.get::<Mutex<i32>>("ppp"));
 }
