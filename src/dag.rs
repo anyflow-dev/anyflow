@@ -128,22 +128,27 @@ pub struct NodeResults {
     inner: Vec<Arc<NodeResult>>,
 }
 
-// trait NodeResults {
-//     fn get<T: Any>(&self, idx: usize) -> Option<&T>;
-//     fn is_err(&self,idx: usize) -> bool;
-//     fn get_err(&self,idx: usize) -> Option<&str>;
-// }
-
 impl NodeResults {
-    fn get<T: Any>(&self, idx: usize) -> Option<&T> {
+    pub fn get<T: Any>(&self, idx: usize) -> Result<&T, &'static str> {
         if idx >= self.inner.len() {
-            None
+            Err("out of index")
         } else {
             self.inner[idx].get::<T>()
         }
     }
 
-    fn is_err(&self,idx: usize) -> bool {
+    pub fn mget<T: Any>(&self) -> Result<Vec<&T>, &'static str> {
+        let mut ret = Vec::with_capacity(self.len());
+        for idx in 0..self.inner.len() {
+            match self.get::<T>(idx) {
+                Ok(val) => ret.push(val),
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(ret)
+    }
+
+    pub fn is_err(&self, idx: usize) -> bool {
         if idx >= self.inner.len() {
             false
         } else {
@@ -151,28 +156,32 @@ impl NodeResults {
         }
     }
 
-    fn get_err(&self,idx: usize) -> Option<&str> {
+    pub fn get_err(&self, idx: usize) -> Option<&str> {
         if idx >= self.inner.len() {
             None
         } else {
             self.inner[idx].get_err()
         }
     }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
 }
 
 impl NodeResult {
-    fn get<T: Any>(&self) -> Option<&T> {
+    pub fn get<T: Any>(&self) -> Result<&T, &'static str> {
         match &self {
             NodeResult::Ok(val) => match val.downcast_ref::<T>() {
-                Some(val) => Some(val),
-                None => None,
+                Some(val) => Ok(val),
+                None => Err("invalid type"),
             },
             NodeResult::Err(e) => None,
             NodeResult::None => None,
         }
     }
 
-    fn is_err(&self) -> bool {
+    pub fn is_err(&self) -> bool {
         match &self {
             NodeResult::Ok(_) => false,
             NodeResult::Err(_) => true,
@@ -180,12 +189,16 @@ impl NodeResult {
         }
     }
 
-    fn get_err(&self) -> Option<&str> {
+    pub fn get_err(&self) -> Option<&str> {
         match &self {
             NodeResult::Ok(_) => None,
             NodeResult::Err(e) => Some(e),
             NodeResult::None => None,
         }
+    }
+
+    pub fn ok<T: Any +Send>(t: T) -> NodeResult {
+        NodeResult::Ok(Arc::new(t))
     }
 }
 
