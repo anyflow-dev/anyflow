@@ -104,7 +104,7 @@ impl NodeResult {
         }
     }
 
-    pub fn ok<T: Any +Send>(t: T) -> NodeResult {
+    pub fn ok<T: Any + Send>(t: T) -> NodeResult {
         NodeResult::Ok(Arc::new(t))
     }
 }
@@ -240,7 +240,8 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
     pre: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a Arc<NodeResults>) -> T + Send + Sync>,
     post: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a Arc<NodeResults>, &T) + Send + Sync>,
     timeout_cb: Arc<dyn for<'b> Fn(Arc<DAGNode>, &'b Arc<NodeResults>) + Send + Sync>,
-    failure_cb: Arc<dyn for<'a> Fn(Arc<DAGNode>, &'a Arc<NodeResults>, &'a NodeResult) + Send + Sync>,
+    failure_cb:
+        Arc<dyn for<'a> Fn(Arc<DAGNode>, &'a Arc<NodeResults>, &'a NodeResult) + Send + Sync>,
 
     // register
     node_mapping: HashMap<
@@ -580,15 +581,12 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                 .collect();
         }
 
-
         let mut collector = Vec::with_capacity(deps.len());
         while let Some(item) = deps.next().await {
             collector.push(item);
         }
 
-        let prev_results = Arc::new(NodeResults {
-            inner: collector,
-        });
+        let prev_results = Arc::new(NodeResults { inner: collector });
 
         let params_ptr = &nodes.get(&node).unwrap().node_config.params;
         let _handle_fn = Arc::clone(
@@ -666,18 +664,6 @@ where
         self(q, e, w).await
     }
 }
-
-// #[async_trait]
-// impl<F, Fut, E> AsyncHandler<E> for F
-// where
-//     F: FnOnce(Arc<E>, Box<RawValue>) -> Fut + Clone + Send + Sync + 'static,
-//     Fut: Future<Output = NodeResult> + Send,
-//     E: Send + Sync + 'static,
-// {
-//     async fn call(self, q: Arc<E>, e: Box<RawValue>) -> NodeResult {
-//         self(q, e).await
-//     }
-// }
 
 #[derive(Clone, Copy)]
 struct AsyncContainer<B> {
