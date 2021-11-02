@@ -22,14 +22,14 @@ fn calc<'a, E: Send + Sync>(
 ) -> anyflow::NodeResult {
     let p: Val = serde_json::from_str(params.get()).unwrap();
 
-    // let val: i32 = match input.get::<i32>("res") {
-    //     Ok(val) => *val,
-    //     Err(_e) => 0,
-    // };
-    // println!("params {:?} {:?}", p, val);
     let mut r = anyflow::NodeResult::default();
-    // r.set("res", val + p.val);
-    r
+    let mut sum: i32 = 0;
+    println!("xxx{:?}", input.len());
+    for i in input.mget::<i32>().unwrap() {
+        sum += i;
+    }
+
+    anyflow::NodeResult::ok(sum + p.val)
 }
 
 async fn async_calc<E: Send + Sync>(
@@ -39,14 +39,18 @@ async fn async_calc<E: Send + Sync>(
 ) -> anyflow::NodeResult {
     let p: Val = serde_json::from_str(params.get()).unwrap();
 
-    // let val: i32 = match input.get::<i32>("res") {
-    //     Ok(val) => *val,
-    //     Err(_e) => 0,
-    // };
-    // println!("params {:?} {:?}", p, val);
     let mut r = anyflow::NodeResult::default();
-    // r.set("res", val + p.val);
-    r
+    let mut sum: i32 = 0;
+    println!("xxx{:?}", input.len());
+
+    for idx in 0..input.len() {
+        match input.get::<i32>(idx) {
+            Ok(val) => sum += val,
+            Err(e) => {},
+        }
+    }
+
+    anyflow::NodeResult::ok(sum + p.val)
 }
 
 fn smol_main() {
@@ -107,7 +111,8 @@ fn async_std_main() {
     // dag.async_register("async_calc", Arc::new(async_calc));
     for _i in 0..1 {
         let my_dag = dag.make_flow(Arc::new(1));
-        task::block_on(my_dag);
+        let r = task::block_on(my_dag);
+        println!("result {:?}", r[0].get::<i32>());
     }
 
     // match guard.report().build() {
@@ -122,12 +127,11 @@ fn async_std_main() {
 }
 
 fn main() {
-    // async_std_main();
-    let mut a = anyflow::FlowResult::new();
+    async_std_main();
     let q: i32 = 5;
-    a.set("ppp", Mutex::new(q));
-    let p = a.get::<Mutex<i32>>("ppp");
+    let mut a = anyflow::NodeResult::Ok(Arc::new(Mutex::new(5)));
+    let p = a.get::<Mutex<i32>>();
     // let mut u = ;
     *p.unwrap().lock().unwrap() = 6;
-    println!("{:?}", a.get::<Mutex<i32>>("ppp"));
+    println!("{:?}", a.get::<Mutex<i32>>());
 }

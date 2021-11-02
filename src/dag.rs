@@ -21,86 +21,7 @@ use std::time::Duration;
 use std::time::SystemTime;
 use tower_service::Service;
 
-#[derive(Clone, Debug)]
-pub enum FlowResult {
-    Ok(HashMap<String, Arc<dyn Any + std::marker::Send>>),
-    Err(&'static str),
-}
-
-unsafe impl Send for FlowResult {}
-unsafe impl Sync for FlowResult {}
-
-impl Default for FlowResult {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl FlowResult {
-    pub fn new() -> FlowResult {
-        FlowResult::Ok(HashMap::new())
-    }
-    pub fn get<T: Any + Debug>(&self, key: &str) -> Result<&T, &'static str> {
-        match self {
-            FlowResult::Ok(kv) => match kv.get(&key.to_string()) {
-                Some(val) => match val.downcast_ref::<T>() {
-                    Some(val) => Ok(val),
-                    None => Err("type error"),
-                },
-                None => Err("miss key"),
-            },
-            FlowResult::Err(e) => Err(e),
-        }
-    }
-    pub fn set<T: Any + Debug + std::marker::Send>(&mut self, key: &str, val: T) -> &FlowResult {
-        match self {
-            FlowResult::Ok(kv) => {
-                kv.insert(key.to_string(), Arc::new(val));
-                self
-            }
-            FlowResult::Err(_e) => self,
-        }
-    }
-    fn merge(&self, other: &FlowResult) -> FlowResult {
-        match self {
-            FlowResult::Ok(kv) => {
-                let mut new_kv = kv.clone();
-                match other {
-                    FlowResult::Ok(other_kv) => new_kv.extend(other_kv.clone()),
-                    FlowResult::Err(_e) => {}
-                }
-                FlowResult::Ok(new_kv)
-            }
-            FlowResult::Err(e) => FlowResult::Err(e),
-        }
-    }
-
-    pub fn get_map<T: Any + Debug + Clone + std::marker::Send>(
-        &self,
-    ) -> Result<HashMap<String, &T>, &'static str> {
-        match self {
-            FlowResult::Ok(kv) => {
-                let mut ret = HashMap::new();
-                for (k, v) in kv {
-                    match v.downcast_ref::<T>() {
-                        Some(val) => ret.insert(k.clone(), val),
-                        None => return Err("type assert failed"),
-                    };
-                }
-                Ok(ret)
-            }
-            FlowResult::Err(e) => Err(e),
-        }
-    }
-
-    fn is_err(&self) -> bool {
-        match self {
-            FlowResult::Ok(_) => true,
-            FlowResult::Err(_) => false,
-        }
-    }
-}
-
+#[derive(Debug, Clone)]
 pub enum NodeResult {
     Ok(Arc<dyn Any + std::marker::Send>),
     Err(String),
@@ -114,22 +35,27 @@ pub struct NodeResults {
     inner: Vec<Arc<NodeResult>>,
 }
 
-// trait NodeResults {
-//     fn get<T: Any>(&self, idx: usize) -> Option<&T>;
-//     fn is_err(&self,idx: usize) -> bool;
-//     fn get_err(&self,idx: usize) -> Option<&str>;
-// }
-
 impl NodeResults {
-    fn get<T: Any>(&self, idx: usize) -> Option<&T> {
+    pub fn get<T: Any>(&self, idx: usize) -> Result<&T, &'static str> {
         if idx >= self.inner.len() {
-            None
+            Err("out of index")
         } else {
             self.inner[idx].get::<T>()
         }
     }
 
-    fn is_err(&self,idx: usize) -> bool {
+    pub fn mget<T: Any>(&self) -> Result<Vec<&T>, &'static str> {
+        let mut ret = Vec::with_capacity(self.len());
+        for idx in 0..self.inner.len() {
+            match self.get::<T>(idx) {
+                Ok(val) => ret.push(val),
+                Err(e) => return Err(e),
+            }
+        }
+        Ok(ret)
+    }
+
+    pub fn is_err(&self, idx: usize) -> bool {
         if idx >= self.inner.len() {
             false
         } else {
@@ -137,28 +63,32 @@ impl NodeResults {
         }
     }
 
-    fn get_err(&self,idx: usize) -> Option<&str> {
+    pub fn get_err(&self, idx: usize) -> Option<&str> {
         if idx >= self.inner.len() {
             None
         } else {
             self.inner[idx].get_err()
         }
     }
+
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
 }
 
 impl NodeResult {
-    fn get<T: Any>(&self) -> Option<&T> {
+    pub fn get<T: Any>(&self) -> Result<&T, &'static str> {
         match &self {
             NodeResult::Ok(val) => match val.downcast_ref::<T>() {
-                Some(val) => Some(val),
-                None => None,
+                Some(val) => Ok(val),
+                None => Err("invalid type"),
             },
-            NodeResult::Err(_e) => None,
-            NodeResult::None => None,
+            NodeResult::Err(e) => Err("is a error"),
+            NodeResult::None => Err("value is none"),
         }
     }
 
-    fn is_err(&self) -> bool {
+    pub fn is_err(&self) -> bool {
         match &self {
             NodeResult::Ok(_) => false,
             NodeResult::Err(_) => true,
@@ -166,12 +96,16 @@ impl NodeResult {
         }
     }
 
-    fn get_err(&self) -> Option<&str> {
+    pub fn get_err(&self) -> Option<&str> {
         match &self {
             NodeResult::Ok(_) => None,
             NodeResult::Err(e) => Some(e),
             NodeResult::None => None,
         }
+    }
+
+    pub fn ok<T: Any +Send>(t: T) -> NodeResult {
+        NodeResult::Ok(Arc::new(t))
     }
 }
 
@@ -210,10 +144,10 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
 
     // global configures
     timeout: Duration,
-    pre: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a Arc<NodeResult>) -> T + Send + Sync>,
-    post: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a Arc<NodeResult>, &T) + Send + Sync>,
-    timeout_cb: Arc<dyn for<'b> Fn(Arc<DAGNode>, &'b NodeResult) + Send + Sync>,
-    failure_cb: Arc<dyn for<'a> Fn(Arc<DAGNode>, &'a NodeResult, &'a NodeResult) + Send + Sync>,
+    pre: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a Arc<NodeResults>) -> T + Send + Sync>,
+    post: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a Arc<NodeResults>, &T) + Send + Sync>,
+    timeout_cb: Arc<dyn for<'b> Fn(Arc<DAGNode>, &'b Arc<NodeResults>) + Send + Sync>,
+    failure_cb: Arc<dyn for<'a> Fn(Arc<DAGNode>, &'a Arc<NodeResults>, &'a NodeResult) + Send + Sync>,
 
     // register
     node_mapping: HashMap<
@@ -291,15 +225,6 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         H: AsyncHandler<E>,
     {
         AsyncContainer { handler }
-    }
-
-    pub fn registers(
-        &mut self,
-        _nodes: &[(
-            &str,
-            &(dyn for<'a> Fn(&'a Arc<E>, Arc<FlowResult>) -> NodeResult + Sync + Send),
-        )],
-    ) {
     }
 
     pub fn init(&mut self, conf_content: &str) -> Result<(), String> {
@@ -490,11 +415,11 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         have_handled: Arc<Mutex<HashSet<String>>>,
         nodes: Arc<HashMap<String, Arc<DAGNode>>>,
         node: String,
-        pre_fn: Arc<dyn for<'b> Fn(&'b Arc<E>, &'b Arc<NodeResult>) -> T + Send + Sync>,
-        post_fn: Arc<dyn for<'b> Fn(&'b Arc<E>, &'b Arc<NodeResult>, &T) + Send + Sync>,
-        timeout_cb_fn: Arc<dyn for<'b> Fn(Arc<DAGNode>, &'b NodeResult) + Send + Sync>,
+        pre_fn: Arc<dyn for<'b> Fn(&'b Arc<E>, &'b Arc<NodeResults>) -> T + Send + Sync>,
+        post_fn: Arc<dyn for<'b> Fn(&'b Arc<E>, &'b Arc<NodeResults>, &T) + Send + Sync>,
+        timeout_cb_fn: Arc<dyn for<'b> Fn(Arc<DAGNode>, &'b Arc<NodeResults>) + Send + Sync>,
         failure_cb_fn: Arc<
-            dyn for<'b> Fn(Arc<DAGNode>, &'b NodeResult, &'b NodeResult) + Send + Sync,
+            dyn for<'b> Fn(Arc<DAGNode>, &'b Arc<NodeResults>, &'b NodeResult) + Send + Sync,
         >,
         node_mapping: Arc<
             HashMap<
@@ -562,12 +487,15 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                 .collect();
         }
 
-        let mut results = NodeResults {
-            inner: Vec::with_capacity(deps.len()),
-        };
+
+        let mut collector = Vec::with_capacity(deps.len());
         while let Some(item) = deps.next().await {
-            results.inner.push(item);
+            collector.push(item);
         }
+
+        let prev_results = Arc::new(NodeResults {
+            inner: collector,
+        });
 
         let params_ptr = &nodes.get(&node).unwrap().node_config.params;
         let _handle_fn = Arc::clone(
@@ -582,13 +510,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         );
         let arg_ptr = Arc::clone(&args);
 
-        let prev_res = Arc::new(NodeResult::default()); // TODO: remove
-        let pre_result: T = pre_fn(&arg_ptr, &prev_res);
-
-        // let u = async {
-        //     Result::<FlowResult, &'static str>::Ok(FlowResult::new())
-        // }.boxed().await;
-        // pp(u);
+        let pre_result: T = pre_fn(&arg_ptr, &prev_results);
 
         let now = SystemTime::now();
         let res = if nodes.get(&node).unwrap().node_config.cachable
@@ -604,7 +526,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                 let v = async_handle_fn.lock().unwrap().call((
                     Arc::clone(&arg_ptr),
                     params_ptr.clone(),
-                    Arc::new(results),
+                    Arc::clone(&prev_results),
                 ));
                 v.await.unwrap()
                 // handle_fn(&arg_ptr, Arc::clone(&prev_res), params_ptr)
@@ -612,7 +534,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             .await
             {
                 Err(_) => {
-                    timeout_cb_fn(Arc::clone(nodes.get(&node).unwrap()), &prev_res);
+                    timeout_cb_fn(Arc::clone(nodes.get(&node).unwrap()), &prev_results);
 
                     Arc::new(NodeResult::Err("timeout".to_string()))
                 }
@@ -626,7 +548,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             r
         };
 
-        post_fn(&arg_ptr, &prev_res, &pre_result);
+        post_fn(&arg_ptr, &prev_results, &pre_result);
         if res.is_err() && nodes.get(&node).unwrap().node_config.necessary {
             Arc::new(NodeResult::default())
         } else {
@@ -651,6 +573,18 @@ where
         self(q, e, w).await
     }
 }
+
+// #[async_trait]
+// impl<F, Fut, E> AsyncHandler<E> for F
+// where
+//     F: FnOnce(Arc<E>, Box<RawValue>) -> Fut + Clone + Send + Sync + 'static,
+//     Fut: Future<Output = NodeResult> + Send,
+//     E: Send + Sync + 'static,
+// {
+//     async fn call(self, q: Arc<E>, e: Box<RawValue>) -> NodeResult {
+//         self(q, e).await
+//     }
+// }
 
 #[derive(Clone, Copy)]
 struct AsyncContainer<B> {
@@ -710,49 +644,6 @@ impl Future for AsyncHandlerFuture {
         Poll::Ready(Ok(cur))
     }
 }
-
-fn pp(_p: FlowResult) {}
-
-// struct AsyncContainer<B> {
-//     handler: B,
-//     // _marker: PhantomData,
-// }
-
-// impl<B> Clone for AsyncContainer<B>
-// where
-//     B: Clone,
-// {
-//     fn clone(&self) -> Self {
-//         Self {
-//             handler: self.handler.clone(),
-//         }
-//     }
-// }
-
-// impl<B> Copy for AsyncContainer<B> where B: Copy {}
-
-// impl<B> Service<i32> for AsyncContainer<B>
-// where
-//     B: Handler,
-// {
-//     type Response = i32;
-//     type Error = &'static str;
-//     type Future = Pin<Box<dyn Future<Output = Result<i32, &'static str>>>>;
-
-//     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
-//         Poll::Ready(Ok(()))
-//     }
-
-//     fn call(&mut self, req: i32) -> Self::Future {
-//         // create a response in a future.
-//         let fut = async { Ok(5) };
-//         // self.handler.call(req);
-//         let ft = Handler::call(self.handler.clone(), req);
-
-//         // Return the response as an immediate future
-//         Box::pin(fut)
-//     }
-// }
 
 fn get<H>(_handler: H)
 where
