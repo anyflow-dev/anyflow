@@ -24,7 +24,7 @@ fn calc<'a, E: Send + Sync>(
 
     let mut r = anyflow::NodeResult::default();
     let mut sum: i32 = 0;
-    println!("xxx{:?}", input.len());
+    // println!("xxx{:?}", input.len());
     for i in input.mget::<i32>().unwrap() {
         sum += i;
     }
@@ -41,7 +41,7 @@ async fn async_calc<E: Send + Sync>(
 
     let mut r = anyflow::NodeResult::default();
     let mut sum: i32 = 0;
-    println!("xxx{:?}", input.len());
+    // println!("xxx{:?}", input.len());
 
     for idx in 0..input.len() {
         match input.get::<i32>(idx) {
@@ -109,10 +109,10 @@ fn async_std_main() {
     dag.register("calc", Arc::new(calc));
     dag.async_register("calc", async_calc);
     // dag.async_register("async_calc", Arc::new(async_calc));
-    for _i in 0..1000 {
+    for _i in 0..10000 {
         let my_dag = dag.make_flow(Arc::new(1));
         let r = task::block_on(my_dag);
-        println!("result {:?}", r[0].get::<i32>());
+        // println!("result {:?}", r[0].get::<i32>());
     }
 
     match guard.report().build() {
@@ -120,7 +120,7 @@ fn async_std_main() {
             let file = File::create("flamegraph.svg").unwrap();
             report.flamegraph(file).unwrap();
 
-            println!("{:?}", report);
+            // println!("{:?}", report);
         }
         Err(_) => {}
     };
