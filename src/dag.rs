@@ -496,7 +496,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         let prev_results = Arc::new(NodeResults { inner: collector });
 
         let params_ptr = &nodes.get(&node).unwrap().node_config.params;
-        let _handle_fn = Arc::clone(
+        let handle_fn = Arc::clone(
             node_mapping
                 .get(&nodes.get(&node).unwrap().node_config.node)
                 .unwrap(),
@@ -521,12 +521,13 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             Arc::clone(&cached_repo.get(&node).unwrap().0)
         } else {
             let r = match async_std::future::timeout(Duration::from_secs(10), async {
-                let v = async_handle_fn.lock().unwrap().call((
-                    Arc::clone(&arg_ptr),
-                    params_ptr.clone(),
-                    Arc::clone(&prev_results),
-                ));
-                v.await.unwrap()
+                // let v = async_handle_fn.lock().unwrap().call((
+                //     Arc::clone(&arg_ptr),
+                //     params_ptr.clone(),
+                //     Arc::clone(&prev_results),
+                // ));
+                // v.await.unwrap()
+                handle_fn(&arg_ptr, params_ptr, &prev_results)
                 // handle_fn(&arg_ptr, Arc::clone(&prev_res), params_ptr)
             })
             .await
