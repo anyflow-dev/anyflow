@@ -20,6 +20,12 @@ use std::task::{Context, Poll};
 use std::time::Duration;
 use std::time::SystemTime;
 use tower_service::Service;
+use macros::AnyFlowNode;
+
+// #[AnyFlowNode]
+// fn xxx(a: i32) {
+
+// }
 
 #[derive(Debug, Clone)]
 pub enum NodeResult {
@@ -305,20 +311,6 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             .map(|node| node.node_config.name.clone())
             .collect();
 
-        // let mut dag_futures: HashMap<_, _> = self
-        //     .nodes
-        //     .lock()
-        //     .unwrap()
-        //     .iter()
-        //     .map(|(node_name, _)| {
-        //         let entry = async move {
-        //             println!("oihiohiohoiho {:?}", node_name.clone());
-        //             FlowResult::new()
-        //         };
-        //         (node_name.clone(), Box::new(entry.boxed().shared()))
-        //     })
-        //     .collect();
-
         let have_handled: Arc<Mutex<HashSet<String>>> = Arc::new(Mutex::new(HashSet::new()));
 
         let nodes_ptr: Arc<HashMap<String, Arc<DAGNode>>> = Arc::new(
@@ -327,23 +319,6 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                 .map(|(k, v)| (k.clone(), Arc::new(*v.clone())))
                 .collect(),
         );
-        // let _n: Arc<Vec<Box<String>>> = Arc::new(
-        //     self.nodes
-        //         .iter()
-        //         .map(|(key, _val)| Box::new(key.clone()))
-        //         .collect(),
-        // );
-        // let mut dag_futures_ptr: Arc<Mutex<HashMap<_, _>>> = Arc::new(Mutex::new(
-        //     n.iter()
-        //         .map(|node_name| {
-        //             let entry = async move {
-        //                 println!("oihiohiohoiho {:?}", *node_name.clone());
-        //                 FlowResult::new()
-        //             };
-        //             (*node_name.clone(), entry.boxed().shared())
-        //         })
-        //         .collect(),
-        // ));
         let dag_futures_ptr: Arc<
             Mutex<
                 HashMap<
