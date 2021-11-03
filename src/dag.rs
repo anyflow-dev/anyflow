@@ -38,7 +38,7 @@ pub struct NodeResults {
 impl NodeResults {
     pub fn get<T: Any>(&self, idx: usize) -> Result<&T, &'static str> {
         if idx >= self.inner.len() {
-            Err("out of index")
+            Err("out of index") 
         } else {
             self.inner[idx].get::<T>()
         }

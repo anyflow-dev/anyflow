@@ -46,7 +46,7 @@ async fn async_calc<E: Send + Sync>(
     for idx in 0..input.len() {
         match input.get::<i32>(idx) {
             Ok(val) => sum += val,
-            Err(e) => {},
+            Err(e) => {}
         }
     }
 
@@ -82,8 +82,12 @@ fn tokio_main() {
     let data = fs::read_to_string("dag.json").expect("Unable to read file");
     println!("{:?}", dag.init(&data));
     dag.register("calc", Arc::new(calc));
-    let rt = tokio::runtime::Runtime::new().unwrap();
-    for _i in 0..1000 {
+    dag.async_register("calc", async_calc);
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(4)
+        .build()
+        .unwrap();
+    for _i in 0..10000 {
         let my_dag = dag.make_flow(Arc::new(1));
         // println!("{:?}", my_dag.await[0].get::<i32>("res"));
         rt.block_on(my_dag);
@@ -94,7 +98,7 @@ fn tokio_main() {
             let file = File::create("flamegraph.svg").unwrap();
             report.flamegraph(file).unwrap();
 
-            println!("{:?}", report);
+            // println!("{:?}", report);
         }
         Err(_) => {}
     };
@@ -127,7 +131,8 @@ fn async_std_main() {
 }
 
 fn main() {
-    async_std_main();
+    // async_std_main();
+    tokio_main();
     let q: i32 = 5;
     let mut a = anyflow::NodeResult::Ok(Arc::new(Mutex::new(5)));
     let p = a.get::<Mutex<i32>>();
