@@ -84,7 +84,7 @@ fn tokio_main() {
     dag.register("calc", Arc::new(calc));
     dag.async_register("calc", async_calc);
     let rt = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(4)
+        .worker_threads(1)
         .build()
         .unwrap();
     for _i in 0..10000 {
