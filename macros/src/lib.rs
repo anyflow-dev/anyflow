@@ -2,11 +2,12 @@ extern crate proc_macro;
 use proc_macro::TokenStream;
 use proc_macro::*;
 use quote::quote;
-use syn::{parse_macro_input, Attribute, DeriveInput, Ident, Result, Item, Token, braced, token};
+use syn::{parse_macro_input, Attribute, AttributeArgs, DeriveInput, Ident, Result, Item, Token, braced, token, ItemFn};
 use syn::punctuated::Punctuated;
 use syn::parse::*;
 use syn::ItemStruct;
 use syn::Field;
+use quote::ToTokens;
 
 
 struct MyMacroInput {
@@ -31,47 +32,70 @@ impl Parse for MyMacroInput {
 #[proc_macro_attribute]
 pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
     let pp = code.clone();
-    let input = parse_macro_input!(pp as MyMacroInput);
-    // let struct_name = &input.ident.to_string();
-    // println!("xxohiohhoihiox: {:?}", struct_name);
+    let qq = code.clone();
+    let input = parse_macro_input!(pp as ItemFn);
+    let input2 = parse_macro_input!(qq as ItemFn);
+    println!("xxxx {:?}", input.clone().sig.ident);
+    println!("block {:?}", input.clone().block.into_token_stream().to_string());
+    let fn_name = input.sig.ident;
+    let fn_itself = input.block;
+    let method_name = stringify!(fn_name);
+    let params_info = parse_macro_input!(params as AttributeArgs);
+    println!("params_info {:?}", params_info.clone());
 
-//     let x = format!(
-//         r#"
-//     {code}
-//     #[async_trait]
-//     impl AsyncNode for ANode {{
-//         // type Params = {params};
-//     // fn deserialize(self, params_ptr: &Box<RawValue>) -> AnyParams {{
-//     //     serde_json::from_str(params_ptr.get()).unwrap()
-//     // }}
+    let tokens = quote! {
+        // #fn_itself
 
-//     async fn handle<'a, E: Send + Sync>(
-//         self,
-//         graph_args: &'a Arc<E>,
-//         input: Arc<NodeResult>,
-//         // params: Arc<AnyParams>,
-//     ) -> NodeResult {{
 
-//         return self.handle_wrapper(graph_args, input).await;
-//     }}
+        struct #fn_name {}
 
-//     fn name() -> &'static str {{
-//         return "{struct_name}"
-//     }}
-// }}
-// "#,
-//         params = params.to_string(),
-//         code = code.to_string(),
-//         struct_name = struct_name,
-//     );
+        impl #fn_name {
+            fn generate_config() -> HandlerInfo{
+                HandlerInfo{
+                name: "xxx",
+                method_type: HandlerType::Async,
+                has_config: false,
+                }
+            }
+        }
 
-let x = format!(r#"
-fn dummy() {{
-}}
-"#,
-);
+        impl AnyHandler<'_,X> for #fn_name {
+            fn config_generate<'a>(input: &'a Box<RawValue>) -> Box<X> {
+                Box::new(X::default())
+            }
+            fn async_calc<E: Send + Sync>(
+                graph_args: Arc<E>,
+                params: Box<RawValue>,
+                input: Arc<NodeResults>,
+            ) -> NodeResult {
+                let handle = |graph_args, params: Box<RawValue>, input: Arc<NodeResults>| {
+                    #fn_itself
+                };
+                handle(graph_args, params, input)
+            }
+        }
 
-    x.parse().expect("Generated invalid tokens")
+        // struct SerializeWith #generics #where_clause {
+        //     value: &'a #field_ty,
+        //     phantom: core::marker::PhantomData<#item_ty>,
+        // }
+    
+        // impl #generics serde::Serialize for SerializeWith #generics #where_clause {
+        //     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        //     where
+        //         S: serde::Serializer,
+        //     {
+        //         #path(self.value, serializer)
+        //     }
+        // }
+    
+        // SerializeWith {
+        //     value: #value,
+        //     phantom: core::marker::PhantomData::<#item_ty>,
+        // }
+    };
+    println!("{}", format!("xxx {:?}", tokens.to_string()));
+    tokens.into()
 }
 
 macro_rules! resgiter{
