@@ -9,8 +9,14 @@ use std::sync::Arc;
 use std::sync::Mutex;
 // use anyflow::FlowResult;
 use anyflow::dag::NodeResults;
+use macros::AnyFlowNode;
+use anyflow::NodeResult;
+use anyflow;
+use anyflow::HandlerInfo;
+use anyflow::HandlerType;
+use anyflow::AnyHandler;
 
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Serialize, Deserialize, Debug, Default)]
 struct Val {
     val: i32,
 }
@@ -51,6 +57,28 @@ async fn async_calc<E: Send + Sync>(
     }
 
     anyflow::NodeResult::ok(sum + p.val)
+}
+
+#[AnyFlowNode(Val)]
+async fn async_calc_handler_fn<E: Send + Sync>(
+    _graph_args: Arc<E>,
+    params: Box<RawValue>,
+    input: Arc<NodeResults>,
+) -> NodeResult {
+    // let p: Val = serde_json::from_str(params.get()).unwrap();
+
+    let mut r = NodeResult::default();
+    let mut sum: i32 = 0;
+    // println!("xxx{:?}", input.len());
+
+    for idx in 0..input.len() {
+        match input.get::<i32>(idx) {
+            Ok(val) => sum += val,
+            Err(e) => {}
+        }
+    }
+
+    NodeResult::ok(sum + 6)
 }
 
 fn smol_main() {

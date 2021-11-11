@@ -8,5 +8,6 @@ edition = "2018"
 [dependencies]
 quote = "1.0.8"
 syn = {version = "1.0.8", features=["full", "extra-traits"]}
+anyflow = { path = "../../anyflow"}
 [lib]
 proc-macro = true
