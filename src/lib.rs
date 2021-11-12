@@ -5,3 +5,24 @@ pub use dag::HandlerInfo;
 pub use dag::HandlerType;
 pub use dag::NodeResult;
 pub use dag::NodeResults;
+
+#[macro_export]
+macro_rules! resgiter_node{
+    ( $($x:ident),* ) => {
+        // let c = $x;
+        &|| {
+            let mut data:Vec<_> =  Vec::new();
+            $(
+                #[allow(unused_assignments)]
+                {
+                    data.push((
+                        $x::generate_config().name,
+                        $x::async_calc
+                    ));
+                }
+            )*
+            data
+        }
+
+    };
+}

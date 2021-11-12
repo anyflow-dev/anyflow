@@ -16,3 +16,4 @@ pprof = { git = "https://github.com/tikv/pprof-rs", features = ["flamegraph"] }
 regex = "1"
 async-std = {version="1"}
 futures = { version = "0.3.17" }
+async-trait = "0.1"

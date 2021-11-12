@@ -1,4 +1,5 @@
 extern crate proc_macro;
+use anyflow;
 use proc_macro::TokenStream;
 use proc_macro::*;
 use quote::quote;
@@ -7,14 +8,13 @@ use syn::parse::*;
 use syn::punctuated::Punctuated;
 use syn::Field;
 use syn::ItemStruct;
+use syn::Meta::Path;
+use syn::NestedMeta;
+use syn::NestedMeta::Meta;
 use syn::{
     braced, parse_macro_input, token, Attribute, AttributeArgs, DeriveInput, Ident, Item, ItemFn,
     Result, Token,
 };
-use anyflow;
-use syn::NestedMeta;
-use syn::NestedMeta::Meta;
-use syn::Meta::Path;
 
 #[proc_macro_attribute]
 pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
@@ -32,9 +32,8 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
     let method_name = stringify!(fn_name);
     let params_info = parse_macro_input!(params as AttributeArgs);
     // println!("params_info {:?}", params_info[0].clone());
-    let mut config_type : Option<syn::Ident> = None; 
+    let mut config_type: Option<syn::Ident> = None;
     if let Meta(Path(ast)) = &params_info[0] {
-        
         config_type = Some(ast.segments[0].ident.clone());
     }
     println!("xxxx {:?}", config_type);
@@ -45,18 +44,19 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
         impl #fn_name {
             fn generate_config() -> anyflow::HandlerInfo{
                 HandlerInfo{
-                name: "xxx",
+                name: stringify!(#fn_name),
                 method_type: anyflow::HandlerType::Async,
                 has_config: false,
                 }
             }
         }
 
+        #[async_trait]
         impl AnyHandler<'_,#config_type> for #fn_name {
             fn config_generate<'a>(input: &'a Box<RawValue>) -> Box<#config_type> {
                 Box::new(#config_type::default())
             }
-            fn async_calc<E: Send + Sync>(
+            async fn async_calc<E: Send + Sync>(
                 graph_args: Arc<E>,
                 params: Box<RawValue>,
                 input: Arc<anyflow::NodeResults>,
@@ -95,25 +95,6 @@ const SIZE: usize = 3;
 
 struct MyVec {
     data: [i32; SIZE],
-}
-
-macro_rules! resgiter_node{
-    ( $( $x:expr ),* ) => {
-        || {
-            let mut data:Vec<_> =  Vec::new();
-            $(
-                #[allow(unused_assignments)]
-                {
-                    data.push((
-                        $x::generate_config().name,
-                        $x::async_calc
-                    ));
-                }
-            )*
-            data
-        }
-
-    };
 }
 
 // fn demo() {
