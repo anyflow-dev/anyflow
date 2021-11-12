@@ -22,77 +22,6 @@ use std::time::Duration;
 use std::time::SystemTime;
 use tower_service::Service;
 
-#[derive(Deserialize, Default)]
-struct X {}
-
-trait PP {
-    fn info() -> &'static str {
-        "hello"
-    }
-}
-
-struct P {}
-
-impl PP for P {
-    fn info() -> &'static str {
-        "world"
-    }
-}
-
-fn ppp<T: PP>(x: T) -> &'static str {
-    T::info()
-}
-
-fn pppp() {
-    let c = P {};
-    println!("{:?}", ppp(c));
-}
-
-// #[AnyFlowNode(pp)]
-// async fn async_calc<E: Send + Sync>(
-//     _graph_args: Arc<E>,
-//     params: Box<RawValue>,
-//     input: Arc<NodeResults>,
-// ) -> NodeResult {
-//     // let p: Val = serde_json::from_str(params.get()).unwrap();
-
-//     let mut r = NodeResult::default();
-//     let mut sum: i32 = 0;
-//     // println!("xxx{:?}", input.len());
-
-//     for idx in 0..input.len() {
-//         match input.get::<i32>(idx) {
-//             Ok(val) => sum += val,
-//             Err(e) => {}
-//         }
-//     }
-
-//     NodeResult::ok(sum + 6)
-// }
-
-// struct async_calc {}
-// impl async_calc {
-//     fn generate_config() -> HandlerInfo {
-//         HandlerInfo {
-//             name: "xxx",
-//             method_type: HandlerType::Async,
-//             has_config: false,
-//         }
-//     }
-// }
-// impl AnyHandler<'_,X> for async_calc {
-//     fn config_generate<'a>(input: &'a Box<RawValue>) -> Box<X> {
-//         Box::new(X::default())
-//     }
-//     fn async_calc<E: Send + Sync>(
-//         _graph_args: Arc<E>,
-//         params: Box<RawValue>,
-//         input: Arc<NodeResults>,
-//     ) -> NodeResult {
-//         NodeResult::default()
-//     }
-// }
-
 #[async_trait]
 pub trait AnyHandler<'b, B: Deserialize<'b>> {
     fn config_generate<'a>(input: &'a Box<RawValue>) -> Box<B>;
@@ -325,6 +254,14 @@ pub struct DAGNode {
     nexts: HashSet<String>,
 }
 
+struct ConfigContainer<'c, T: Deserialize<'c>> {
+    config: &'c T,
+}
+
+trait AnyConfig {
+    fn get<'c, T: Deserialize<'c>>(&self) -> Option<&'c T>;
+}
+
 pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
     nodes: HashMap<String, Box<DAGNode>>,
 
@@ -363,6 +300,11 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
 
     // cache
     cached_repo: Arc<dashmap::DashMap<String, (Arc<NodeResult>, SystemTime)>>,
+
+    node_config_repo: HashMap<
+        String,
+        Box<AnyConfig>,
+    >,
 }
 
 impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Default for Flow<T, E> {
@@ -372,7 +314,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Default for F
 }
 
 impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
-    pub fn new() -> Flow<T, E> {
+    pub fn new<'a>() -> Flow<T, E> {
         Flow {
             nodes: HashMap::new(),
             timeout: Duration::from_secs(5),
