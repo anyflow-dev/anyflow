@@ -107,8 +107,8 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
         #[async_trait]
         impl AnyHandler for #fn_name {
             fn config_generate(input: Box<RawValue>) 
-                -> Box<(dyn Any + std::marker::Send)> {
-                let c : Box<#config_type> = Box::new(serde_json::from_str(input.get()).unwrap());
+                -> Arc<(dyn Any + std::marker::Send + Sync)> {
+                let c : Arc<#config_type> = Arc::new(serde_json::from_str(input.get()).unwrap());
                 c
             }
             async fn async_calc<E: Send + Sync>(

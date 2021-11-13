@@ -24,7 +24,7 @@ use tower_service::Service;
 
 #[async_trait]
 pub trait AnyHandler {
-    fn config_generate(input: Box<RawValue>) -> Box<Send + Any>;
+    fn config_generate(input: Box<RawValue>) -> Arc<Send + Any + Sync>;
     async fn async_calc<E: Send + Sync>(
         _graph_args: Arc<E>,
         params: Box<RawValue>,
@@ -207,9 +207,10 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
     cached_repo: Arc<dashmap::DashMap<String, (Arc<NodeResult>, SystemTime)>>,
 
     // config cache
-    node_config_repo: HashMap<String, Box<dyn Any + std::marker::Send>>,
+    node_config_repo: HashMap<String, Arc<dyn Any + std::marker::Send + Sync>>,
+    has_node_config_repo: HashMap<String, bool>,
     node_config_generator_repo:
-        HashMap<String, Box<Fn(Box<RawValue>) -> Box<dyn Any + std::marker::Send>>>,
+        HashMap<String, Box<Fn(Box<RawValue>) -> Arc<dyn Any + std::marker::Send + Sync>>>,
 }
 
 impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Default for Flow<T, E> {
@@ -232,6 +233,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             cached_repo: Arc::new(DashMap::new()),
             node_config_repo: HashMap::new(),
             node_config_generator_repo: HashMap::new(),
+            has_node_config_repo: HashMap::new(),
         }
     }
 
@@ -261,7 +263,8 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         handlers_ganerator: &dyn Fn() -> Vec<(
             &'static str,
             H,
-            Box<Fn(Box<RawValue>) -> Box<(dyn Any + std::marker::Send)>>,
+            Box<Fn(Box<RawValue>) -> Arc<(dyn Any + std::marker::Send + Sync)>>,
+            bool,
         )>,
     ) where
         H: AsyncHandler<E>,
@@ -273,6 +276,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             );
             self.node_config_generator_repo
                 .insert(pair.0.to_string(), pair.2);
+            self.has_node_config_repo.insert(pair.0.to_string(), pair.3);
         }
     }
 
@@ -316,6 +320,19 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                     .unwrap()
                     .nexts
                     .insert(node_config.name.clone());
+            }
+
+            if !self.async_node_mapping.contains_key(&node_config.node) {
+                return Err(format!("miss key {:?}", node_config.node));
+            }
+
+            if *self.has_node_config_repo.get(&node_config.node).unwrap() {
+                self.node_config_repo.insert(
+                    node_config.name.clone(),
+                    self.node_config_generator_repo
+                        .get(&node_config.node)
+                        .unwrap()(node_config.params.clone()),
+                );
             }
         }
 
@@ -406,6 +423,18 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                     ),
                     Arc::clone(&args),
                     Arc::clone(&self.cached_repo),
+                    Arc::new(
+                        self.node_config_repo
+                            .iter()
+                            .map(|(key, val)| (key.clone(), Arc::clone(val)))
+                            .collect(),
+                    ),
+                    Arc::new(
+                        self.has_node_config_repo
+                            .iter()
+                            .map(|(key, val)| (key.clone(), val.clone()))
+                            .collect(),
+                    ),
                 )
                 .boxed()
                 .shared(),
@@ -474,6 +503,8 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         >,
         args: Arc<E>,
         cached_repo: Arc<dashmap::DashMap<String, (Arc<NodeResult>, SystemTime)>>,
+        node_config_repo: Arc<HashMap<String, Arc<dyn Any + std::marker::Send + Sync>>>,
+        has_node_config_repo: Arc<HashMap<String, bool>>,
     ) -> Arc<NodeResult> {
         let mut deps = futures::stream::FuturesOrdered::new();
         if nodes.get(&node).unwrap().prevs.is_empty() {
@@ -502,6 +533,8 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                             Arc::clone(&async_node_mapping),
                             Arc::clone(&args),
                             Arc::clone(&cached_repo),
+                            Arc::clone(&node_config_repo),
+                            Arc::clone(&has_node_config_repo),
                         )
                         .boxed()
                         .shared(),

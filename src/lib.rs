@@ -18,7 +18,8 @@ macro_rules! resgiter_node{
                     Box<_>,
                     Arc<_>,
                 ) -> Pin<Box<dyn futures::Future<Output = NodeResult> + std::marker::Send>>,
-                Box<Fn(Box<serde_json::value::RawValue>) -> Box<(dyn Any + std::marker::Send)>>,
+                Box<Fn(Box<serde_json::value::RawValue>) -> Arc<(dyn Any + std::marker::Send + Sync)>>,
+                bool,
             )> = Vec::new();
             $(
                 #[allow(unused_assignments)]
@@ -27,6 +28,7 @@ macro_rules! resgiter_node{
                         $x::generate_config().name,
                         $x::async_calc,
                         Box::new($x::config_generate),
+                        $x::generate_config().has_config,
                     ));
                 }
             )*
