@@ -8,15 +8,16 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::Mutex;
 // use anyflow::FlowResult;
-use anyflow::dag::NodeResults;
-use macros::AnyFlowNode;
-use anyflow::resgiter_node;
-use anyflow::NodeResult;
 use anyflow;
+use anyflow::dag::NodeResults;
+use anyflow::resgiter_node;
+use anyflow::AnyHandler;
+use anyflow::AsyncHandler;
 use anyflow::HandlerInfo;
 use anyflow::HandlerType;
-use anyflow::AnyHandler;
+use anyflow::NodeResult;
 use async_trait::async_trait;
+use macros::AnyFlowNode;
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 struct Val {
@@ -44,9 +45,22 @@ fn calc<E: Send + Sync>(
     NodeResult::ok(sum + p.val)
 }
 
+#[derive(Default)]
+struct P {
+    x: i32,
+    pp: String,
+}
+
+#[AnyFlowNode(Val)]
+fn any_demo<E: Send + Sync>(
+    _graph_args: Arc<E>,
+    params: Box<RawValue>,
+    input: Arc<NodeResults>,
+) -> NodeResult {
+    NodeResult::ok(P::default())
+}
 
 fn smol_main() {
-    let guard = pprof::ProfilerGuard::new(100).unwrap();
     let mut dag = anyflow::dag::Flow::<i32, i32>::new();
     let data = fs::read_to_string("dag.json").expect("Unable to read file");
     println!("{:?}", dag.init(&data));
@@ -56,20 +70,9 @@ fn smol_main() {
         // println!("{:?}", my_dag.await[0].get::<i32>("res"));
         smol::block_on(my_dag);
     }
-    match guard.report().build() {
-        Ok(report) => {
-            let file = File::create("flamegraph.svg").unwrap();
-            report.flamegraph(file).unwrap();
-
-            println!("{:?}", report);
-        }
-        Err(_) => {}
-    };
 }
 
 fn tokio_main() {
-    let guard = pprof::ProfilerGuard::new(100).unwrap();
-
     let mut dag = anyflow::dag::Flow::<i32, i32>::new();
     let data = fs::read_to_string("dag.json").expect("Unable to read file");
     println!("{:?}", dag.init(&data));
@@ -84,42 +87,22 @@ fn tokio_main() {
         // println!("{:?}", my_dag.await[0].get::<i32>("res"));
         rt.block_on(my_dag);
     }
-
-    match guard.report().build() {
-        Ok(report) => {
-            let file = File::create("flamegraph.svg").unwrap();
-            report.flamegraph(file).unwrap();
-
-            // println!("{:?}", report);
-        }
-        Err(_) => {}
-    };
 }
 
 fn async_std_main() {
-    // let guard = pprof::ProfilerGuard::new(100).unwrap();
 
     let mut dag = anyflow::dag::Flow::<i32, i32>::new();
     let data = fs::read_to_string("dag.json").expect("Unable to read file");
     println!("{:?}", dag.init(&data));
     // dag.register("calc", Arc::new(calc));
     // dag.async_register("calc", async_calc);
-    dag.multi_async_register(resgiter_node![calc]);
+    // resgiter_node![calc, any_demo];
+    dag.multi_async_register(resgiter_node![calc, any_demo]);
     for _i in 0..10 {
         let my_dag = dag.make_flow(Arc::new(1));
         let r = task::block_on(my_dag);
         println!("result {:?}", r[0].get::<i32>());
     }
-
-    // match guard.report().build() {
-    //     Ok(report) => {
-    //         let file = File::create("flamegraph.svg").unwrap();
-    //         report.flamegraph(file).unwrap();
-
-    //         // println!("{:?}", report);
-    //     }
-    //     Err(_) => {}
-    // };
 }
 
 fn main() {

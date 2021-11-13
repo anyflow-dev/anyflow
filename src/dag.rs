@@ -254,12 +254,12 @@ pub struct DAGNode {
     nexts: HashSet<String>,
 }
 
-struct ConfigContainer<'c, T: Deserialize<'c>> {
+struct ConfigContainer<'c, T: Deserialize<'c> + Sized> {
     config: &'c T,
 }
 
 trait AnyConfig {
-    fn get<'c, T: Deserialize<'c>>(&self) -> Option<&'c T>;
+    fn get<'c, T: Sized>(&self) -> Option<&'c T>;
 }
 
 pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
@@ -300,11 +300,10 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
 
     // cache
     cached_repo: Arc<dashmap::DashMap<String, (Arc<NodeResult>, SystemTime)>>,
-
-    node_config_repo: HashMap<
-        String,
-        Box<AnyConfig>,
-    >,
+    // node_config_repo: HashMap<
+    //     String,
+    //     Box<AnyConfig>,
+    // >,
 }
 
 impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Default for Flow<T, E> {

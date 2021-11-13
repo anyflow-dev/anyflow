@@ -67,25 +67,6 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
                 handle(graph_args, params, input)
             }
         }
-
-        // struct SerializeWith #generics #where_clause {
-        //     value: &'a #field_ty,
-        //     phantom: core::marker::PhantomData<#item_ty>,
-        // }
-
-        // impl #generics serde::Serialize for SerializeWith #generics #where_clause {
-        //     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-        //     where
-        //         S: serde::Serializer,
-        //     {
-        //         #path(self.value, serializer)
-        //     }
-        // }
-
-        // SerializeWith {
-        //     value: #value,
-        //     phantom: core::marker::PhantomData::<#item_ty>,
-        // }
     };
     println!("{}", format!("xxx {:?}", tokens.to_string()));
     tokens.into()
