@@ -115,6 +115,86 @@ impl Default for NodeResult {
     }
 }
 
+pub enum NodeResult {
+    Ok(Arc<dyn Any + std::marker::Send>),
+    Err(String),
+    None,
+}
+
+unsafe impl Send for NodeResult {}
+unsafe impl Sync for NodeResult {}
+
+pub struct NodeResults {
+    inner: Vec<Arc<NodeResult>>,
+}
+
+// trait NodeResults {
+//     fn get<T: Any>(&self, idx: usize) -> Option<&T>;
+//     fn is_err(&self,idx: usize) -> bool;
+//     fn get_err(&self,idx: usize) -> Option<&str>;
+// }
+
+impl NodeResults {
+    fn get<T: Any>(&self, idx: usize) -> Option<&T> {
+        if idx >= self.inner.len() {
+            None
+        } else {
+            self.inner[idx].get::<T>()
+        }
+    }
+
+    fn is_err(&self,idx: usize) -> bool {
+        if idx >= self.inner.len() {
+            false
+        } else {
+            self.inner[idx].is_err()
+        }
+    }
+
+    fn get_err(&self,idx: usize) -> Option<&str> {
+        if idx >= self.inner.len() {
+            None
+        } else {
+            self.inner[idx].get_err()
+        }
+    }
+}
+
+impl NodeResult {
+    fn get<T: Any>(&self) -> Option<&T> {
+        match &self {
+            NodeResult::Ok(val) => match val.downcast_ref::<T>() {
+                Some(val) => Some(val),
+                None => None,
+            },
+            NodeResult::Err(e) => None,
+            NodeResult::None => None,
+        }
+    }
+
+    fn is_err(&self) -> bool {
+        match &self {
+            NodeResult::Ok(_) => false,
+            NodeResult::Err(_) => true,
+            NodeResult::None => false,
+        }
+    }
+
+    fn get_err(&self) -> Option<&str> {
+        match &self {
+            NodeResult::Ok(_) => None,
+            NodeResult::Err(e) => Some(e),
+            NodeResult::None => None,
+        }
+    }
+}
+
+impl Default for NodeResult {
+    fn default() -> Self {
+        NodeResult::None
+    }
+}
+
 #[derive(Deserialize, Default, Debug, Clone)]
 struct NodeConfig {
     name: String,
