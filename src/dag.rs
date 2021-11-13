@@ -23,7 +23,7 @@ use std::time::SystemTime;
 use tower_service::Service;
 
 #[async_trait]
-pub trait AnyHandler<'b, B: Deserialize<'b>> {
+pub trait AnyHandler<'b, B: Deserialize<'b> + Send + Any> {
     fn config_generate<'a>(input: &'a Box<RawValue>) -> Box<B>;
     async fn async_calc<E: Send + Sync>(
         _graph_args: Arc<E>,
@@ -254,14 +254,6 @@ pub struct DAGNode {
     nexts: HashSet<String>,
 }
 
-struct ConfigContainer<'c, T: Deserialize<'c> + Sized> {
-    config: &'c T,
-}
-
-trait AnyConfig {
-    fn get<'c, T: Sized>(&self) -> Option<&'c T>;
-}
-
 pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
     nodes: HashMap<String, Box<DAGNode>>,
 
@@ -300,10 +292,9 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
 
     // cache
     cached_repo: Arc<dashmap::DashMap<String, (Arc<NodeResult>, SystemTime)>>,
-    // node_config_repo: HashMap<
-    //     String,
-    //     Box<AnyConfig>,
-    // >,
+
+    // config cache
+    node_config_repo: HashMap<String, Box<Any + std::marker::Send>>,
 }
 
 impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Default for Flow<T, E> {
@@ -324,6 +315,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             node_mapping: HashMap::new(),
             async_node_mapping: HashMap::new(),
             cached_repo: Arc::new(DashMap::new()),
+            node_config_repo: HashMap::new(),
         }
     }
 

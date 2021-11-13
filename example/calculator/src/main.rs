@@ -24,24 +24,19 @@ struct Val {
     val: i32,
 }
 
-#[AnyFlowNode(Val)]
-fn calc<E: Send + Sync>(
-    _graph_args: Arc<E>,
-    params: Box<RawValue>,
-    input: Arc<NodeResults>,
-) -> NodeResult {
-    let p: Val = serde_json::from_str(params.get()).unwrap();
+#[derive(Deserialize, Default)]
+struct Placeholder {} // TODO: remove
 
+#[AnyFlowNode(Val)]
+fn calc<E: Send + Sync>(_graph_args: Arc<E>, p: Val, input: Arc<NodeResults>) -> NodeResult {
     let mut r = NodeResult::default();
     let mut sum: i32 = 0;
-
     for idx in 0..input.len() {
         match input.get::<i32>(idx) {
             Ok(val) => sum += val,
             Err(e) => {}
         }
     }
-
     NodeResult::ok(sum + p.val)
 }
 
@@ -51,12 +46,8 @@ struct P {
     pp: String,
 }
 
-#[AnyFlowNode(Val)]
-fn any_demo<E: Send + Sync>(
-    _graph_args: Arc<E>,
-    params: Box<RawValue>,
-    input: Arc<NodeResults>,
-) -> NodeResult {
+#[AnyFlowNode]
+fn any_demo<E: Send + Sync>(_graph_args: Arc<E>, input: Arc<NodeResults>) -> NodeResult {
     NodeResult::ok(P::default())
 }
 
@@ -90,7 +81,6 @@ fn tokio_main() {
 }
 
 fn async_std_main() {
-
     let mut dag = anyflow::dag::Flow::<i32, i32>::new();
     let data = fs::read_to_string("dag.json").expect("Unable to read file");
     println!("{:?}", dag.init(&data));
