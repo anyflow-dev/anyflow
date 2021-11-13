@@ -24,7 +24,7 @@ use tower_service::Service;
 
 #[async_trait]
 pub trait AnyHandler {
-    fn config_generate<'a>(input: &'a Box<RawValue>) -> Box<Send + Any>;
+    fn config_generate(input: Box<RawValue>) -> Box<Send + Any>;
     async fn async_calc<E: Send + Sync>(
         _graph_args: Arc<E>,
         params: Box<RawValue>,
@@ -208,6 +208,8 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
 
     // config cache
     node_config_repo: HashMap<String, Box<dyn Any + std::marker::Send>>,
+    node_config_generator_repo:
+        HashMap<String, Box<Fn(Box<RawValue>) -> Box<dyn Any + std::marker::Send>>>,
 }
 
 impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Default for Flow<T, E> {
@@ -229,6 +231,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             async_node_mapping: HashMap::new(),
             cached_repo: Arc::new(DashMap::new()),
             node_config_repo: HashMap::new(),
+            node_config_generator_repo: HashMap::new(),
         }
     }
 
@@ -255,7 +258,11 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
 
     pub fn multi_async_register<H>(
         &mut self,
-        handlers_ganerator: &dyn Fn() -> Vec<(&'static str, H)>,
+        handlers_ganerator: &dyn Fn() -> Vec<(
+            &'static str,
+            H,
+            Box<Fn(Box<RawValue>) -> Box<(dyn Any + std::marker::Send)>>,
+        )>,
     ) where
         H: AsyncHandler<E>,
     {
@@ -264,6 +271,8 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                 pair.0.to_string(),
                 Arc::new(Mutex::new(Flow::<T, E>::wrap(pair.1))),
             );
+            self.node_config_generator_repo
+                .insert(pair.0.to_string(), pair.2);
         }
     }
 

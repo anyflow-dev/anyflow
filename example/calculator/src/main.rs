@@ -84,6 +84,7 @@ fn tokio_main() {
 fn async_std_main() {
     let mut dag = anyflow::dag::Flow::<i32, i32>::new();
     let data = fs::read_to_string("dag.json").expect("Unable to read file");
+    // resgiter_node![calc, any_demo];
     dag.multi_async_register(resgiter_node![calc, any_demo]);
     let my_dag = dag.make_flow(Arc::new(1));
     let r = task::block_on(my_dag);

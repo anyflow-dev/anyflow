@@ -2,28 +2,28 @@ extern crate proc_macro;
 use anyflow;
 use proc_macro::TokenStream;
 use proc_macro::*;
+use proc_macro2::Span;
 use quote::quote;
 use quote::ToTokens;
+use std::any::Any;
 use syn::parse::*;
 use syn::punctuated::Punctuated;
 use syn::Field;
+use syn::FnArg;
 use syn::ItemStruct;
 use syn::Meta::Path;
 use syn::NestedMeta;
 use syn::NestedMeta::Meta;
 use syn::{
     braced, parse_macro_input, token, Attribute, AttributeArgs, DeriveInput, Ident, Item, ItemFn,
-    Result, Token, Pat,
+    Pat, Result, Token,
 };
-use syn::FnArg;
-use proc_macro2::{Span};
-use std::any::Any;
 
 fn get_val(val: &FnArg) -> Ident {
     let temp = if let FnArg::Typed(val) = val {
         match &*val.pat {
             Pat::Ident(i) => Some(i.ident.clone()),
-            _ =>  None
+            _ => None,
         }
     } else {
         None
@@ -38,7 +38,7 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
     let input = parse_macro_input!(pp as ItemFn);
     let input2 = parse_macro_input!(qq as ItemFn);
     let input_args = input2.sig.inputs.iter().cloned().collect::<Vec<FnArg>>();
-    println!("input2 {:?}",input_args[0]);
+    println!("input2 {:?}", input_args[0]);
     println!("xxxx {:?}", input.clone().sig.ident);
     println!(
         "block {:?}",
@@ -49,7 +49,7 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
     let method_name = stringify!(fn_name);
     let params_info = parse_macro_input!(params as AttributeArgs);
     println!("xxxpppp {:?}", input_args.len());
-    if (input_args.len() >3) || (input_args.len() < 2) {
+    if (input_args.len() > 3) || (input_args.len() < 2) {
         panic!("invalid input");
     }
 
@@ -66,14 +66,14 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
 
     let mut config_type = Ident::new("Placeholder", Span::call_site());
 
-    if params_info.len() > 0 && input_args.len() == 3{
+    if params_info.len() > 0 && input_args.len() == 3 {
         println!("params_info {:?}", params_info[0].clone());
         if let Meta(Path(ast)) = &params_info[0] {
             config_type = ast.segments[0].ident.clone();
         }
         println!("xxxx {:?}", config_type);
         let third_arg = &get_val(&input_args[2]);
-        
+
         fn_content = quote! {
             let handle = |#first_arg, #second_arg: #config_type, #third_arg: Arc<anyflow::NodeResults>| {
                 #fn_itself
@@ -82,7 +82,7 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
             handle(graph_args, p, input)
         };
 
-        fn_content2 =  quote! {
+        fn_content2 = quote! {
             let handle = |#first_arg, #second_arg: &#config_type, #third_arg: Arc<anyflow::NodeResults>| {
                 #fn_itself
             };
@@ -106,7 +106,8 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
 
         #[async_trait]
         impl AnyHandler for #fn_name {
-            fn config_generate<'a>(input: &'a Box<RawValue>) -> Box<(dyn Any + std::marker::Send)> {
+            fn config_generate(input: Box<RawValue>) 
+                -> Box<(dyn Any + std::marker::Send)> {
                 let c : Box<#config_type> = Box::new(serde_json::from_str(input.get()).unwrap());
                 c
             }
