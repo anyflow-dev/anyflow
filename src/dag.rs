@@ -105,7 +105,7 @@ impl NodeResult {
                 Some(val) => Ok(val),
                 None => Err("invalid type"),
             },
-            NodeResult::Err(e) => Err("is a error"),
+            NodeResult::Err(_e) => Err("is a error"),
             NodeResult::None => Err("value is none"),
         }
     }
@@ -294,7 +294,7 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
     cached_repo: Arc<dashmap::DashMap<String, (Arc<NodeResult>, SystemTime)>>,
 
     // config cache
-    node_config_repo: HashMap<String, Box<Any + std::marker::Send>>,
+    node_config_repo: HashMap<String, Box<dyn Any + std::marker::Send>>,
 }
 
 impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Default for Flow<T, E> {

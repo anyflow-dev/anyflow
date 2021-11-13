@@ -28,7 +28,7 @@ struct Val {
 struct Placeholder {} // TODO: remove
 
 #[AnyFlowNode(Val)]
-fn calc<E: Send + Sync>(_graph_args: Arc<E>, p: Val, input: Arc<NodeResults>) -> NodeResult {
+fn calc<E: Send + Sync>(graph_args: Arc<E>, p: Val, input: Arc<NodeResults>) -> NodeResult {
     let mut r = NodeResult::default();
     let mut sum: i32 = 0;
     for idx in 0..input.len() {

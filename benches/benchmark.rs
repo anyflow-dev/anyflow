@@ -19,14 +19,14 @@ fn calc<'a, E: Send + Sync>(
 ) -> anyflow::NodeResult {
     let p: Val = serde_json::from_str(params.get()).unwrap();
 
-    let mut r = anyflow::NodeResult::default();
+    let _r = anyflow::NodeResult::default();
     let mut sum: i32 = 0;
     // println!("xxx{:?}", input.len());
 
     for idx in 0..input.len() {
         match input.get::<i32>(idx) {
             Ok(val) => sum += val,
-            Err(e) => {}
+            Err(_e) => {}
         }
     }
 
@@ -40,14 +40,14 @@ async fn async_calc<E: Send + Sync>(
 ) -> anyflow::NodeResult {
     let p: Val = serde_json::from_str(params.get()).unwrap();
 
-    let mut r = anyflow::NodeResult::default();
+    let _r = anyflow::NodeResult::default();
     let mut sum: i32 = 0;
     // println!("xxx{:?}", input.len());
 
     for idx in 0..input.len() {
         match input.get::<i32>(idx) {
             Ok(val) => sum += val,
-            Err(e) => {}
+            Err(_e) => {}
         }
     }
 
@@ -62,7 +62,7 @@ fn smol_main(times: i32) {
     dag.async_register("calc", async_calc);
     for _i in 0..times {
         let my_dag = dag.make_flow(Arc::new(1));
-        let r = smol::block_on(my_dag);
+        let _r = smol::block_on(my_dag);
         // println!("result {:?}", r[0].get::<i32>());
     }
 }
@@ -76,7 +76,7 @@ fn tokio_main(times: i32) {
     let rt = tokio::runtime::Runtime::new().unwrap();
     for _i in 0..times {
         let my_dag = dag.make_flow(Arc::new(1));
-        let r = rt.block_on(my_dag);
+        let _r = rt.block_on(my_dag);
         // println!("xxx {:?}", r);
         // println!("result {:?}", r[0].get::<i32>());
     }
@@ -91,7 +91,7 @@ fn async_std_main(times: i32) {
     // dag.async_register("async_calc", Arc::new(async_calc));
     for _i in 0..times {
         let my_dag = dag.make_flow(Arc::new(1));
-        let r = task::block_on(my_dag);
+        let _r = task::block_on(my_dag);
         // println!("result {:?}", r[0].get::<i32>());
     }
 }
