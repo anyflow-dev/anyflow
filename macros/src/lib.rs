@@ -16,6 +16,8 @@ use syn::{
     Result, Token, Pat,
 };
 use syn::FnArg;
+use proc_macro2::{Span};
+use std::any::Any;
 
 fn get_val(val: &FnArg) -> Ident {
     let temp = if let FnArg::Typed(val) = val {
@@ -60,11 +62,14 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
         };
         handle(graph_args, input)
     };
+    let mut fn_content2 = fn_content.clone();
+
+    let mut config_type = Ident::new("Placeholder", Span::call_site());
+
     if params_info.len() > 0 && input_args.len() == 3{
         println!("params_info {:?}", params_info[0].clone());
-        let mut config_type: Option<syn::Ident> = None;
         if let Meta(Path(ast)) = &params_info[0] {
-            config_type = Some(ast.segments[0].ident.clone());
+            config_type = ast.segments[0].ident.clone();
         }
         println!("xxxx {:?}", config_type);
         let third_arg = &get_val(&input_args[2]);
@@ -75,7 +80,15 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
             };
             let p: #config_type = serde_json::from_str(params.get()).unwrap();
             handle(graph_args, p, input)
-        }
+        };
+
+        fn_content2 =  quote! {
+            let handle = |#first_arg, #second_arg: &#config_type, #third_arg: Arc<anyflow::NodeResults>| {
+                #fn_itself
+            };
+            let p = params.downcast_ref::<#config_type>().unwrap();
+            handle(graph_args, p, input)
+        };
     }
 
     let tokens = quote! {
@@ -92,9 +105,9 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
         }
 
         #[async_trait]
-        impl AnyHandler<'_,Placeholder> for #fn_name {
-            fn config_generate<'a>(input: &'a Box<RawValue>) -> Box<Placeholder> {
-                Box::new(Placeholder::default())
+        impl AnyHandler<'_,#config_type> for #fn_name {
+            fn config_generate<'a>(input: &'a Box<RawValue>) -> Box<#config_type> {
+                Box::new(#config_type::default())
             }
             async fn async_calc<E: Send + Sync>(
                 graph_args: Arc<E>,
@@ -102,6 +115,14 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
                 input: Arc<anyflow::NodeResults>,
             ) -> NodeResult {
                 #fn_content
+            }
+
+            async fn async_calc2<E: Send + Sync>(
+                graph_args: Arc<E>,
+                params: Box<Any + Send>,
+                input: Arc<anyflow::NodeResults>,
+            ) -> NodeResult {
+                #fn_content2
             }
         }
     };

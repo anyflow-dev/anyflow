@@ -9,5 +9,6 @@ edition = "2018"
 quote = "1.0.8"
 syn = {version = "1.0.8", features=["full", "extra-traits"]}
 anyflow = { path = "../../anyflow"}
+proc-macro2 = {version="1.0"}
 [lib]
 proc-macro = true

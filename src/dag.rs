@@ -30,6 +30,12 @@ pub trait AnyHandler<'b, B: Deserialize<'b> + Send + Any> {
         params: Box<RawValue>,
         input: Arc<NodeResults>,
     ) -> NodeResult;
+
+    async fn async_calc2<E: Send + Sync>(
+        _graph_args: Arc<E>,
+        params: Box<Any + Send>,
+        input: Arc<NodeResults>,
+    ) -> NodeResult;
 }
 
 pub struct HandlerInfo {

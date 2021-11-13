@@ -18,6 +18,7 @@ use anyflow::HandlerType;
 use anyflow::NodeResult;
 use async_trait::async_trait;
 use macros::AnyFlowNode;
+use std::any::Any;
 
 #[derive(Serialize, Deserialize, Debug, Default)]
 struct Val {
@@ -83,16 +84,10 @@ fn tokio_main() {
 fn async_std_main() {
     let mut dag = anyflow::dag::Flow::<i32, i32>::new();
     let data = fs::read_to_string("dag.json").expect("Unable to read file");
-    println!("{:?}", dag.init(&data));
-    // dag.register("calc", Arc::new(calc));
-    // dag.async_register("calc", async_calc);
-    // resgiter_node![calc, any_demo];
     dag.multi_async_register(resgiter_node![calc, any_demo]);
-    for _i in 0..10 {
-        let my_dag = dag.make_flow(Arc::new(1));
-        let r = task::block_on(my_dag);
-        println!("result {:?}", r[0].get::<i32>());
-    }
+    let my_dag = dag.make_flow(Arc::new(1));
+    let r = task::block_on(my_dag);
+    println!("result {:?}", r[0].get::<i32>());
 }
 
 fn main() {
