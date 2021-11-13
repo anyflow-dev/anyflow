@@ -23,8 +23,8 @@ use std::time::SystemTime;
 use tower_service::Service;
 
 #[async_trait]
-pub trait AnyHandler<'b, B: Deserialize<'b> + Send + Any> {
-    fn config_generate<'a>(input: &'a Box<RawValue>) -> Box<B>;
+pub trait AnyHandler {
+    fn config_generate<'a>(input: &'a Box<RawValue>) -> Box<Send + Any>;
     async fn async_calc<E: Send + Sync>(
         _graph_args: Arc<E>,
         params: Box<RawValue>,
