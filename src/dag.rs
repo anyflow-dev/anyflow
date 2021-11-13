@@ -33,7 +33,7 @@ pub trait AnyHandler {
 
     async fn async_calc2<E: Send + Sync>(
         _graph_args: Arc<E>,
-        params: Box<Any + Send>,
+        params: Arc<Any + Send + Sync>,
         input: Arc<NodeResults>,
     ) -> NodeResult;
 }
@@ -193,7 +193,7 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
         Arc<
             Mutex<
                 dyn Service<
-                        (Arc<E>, Box<RawValue>, Arc<NodeResults>),
+                        (Arc<E>, Arc<Any + Sync + Send>, Arc<NodeResults>),
                         Response = NodeResult,
                         Error = &'static str,
                         Future = AsyncHandlerFuture,
@@ -491,7 +491,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                 Arc<
                     Mutex<
                         dyn Service<
-                                (Arc<E>, Box<RawValue>, Arc<NodeResults>),
+                                (Arc<E>, Arc<Any + Sync + Send>, Arc<NodeResults>),
                                 Response = NodeResult,
                                 Error = &'static str,
                                 Future = AsyncHandlerFuture,
@@ -552,7 +552,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
 
         let prev_results = Arc::new(NodeResults { inner: collector });
 
-        let params_ptr = &nodes.get(&node).unwrap().node_config.params;
+        let params_ptr = node_config_repo.get(&node).unwrap();
         // println!("xxx {:?}", node_mapping.keys());
         // let handle_fn = Arc::clone(
         //     node_mapping
@@ -616,17 +616,21 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
 
 #[async_trait]
 pub trait AsyncHandler<E>: Clone + Sync + Send + Sized + 'static {
-    async fn call(self, q: Arc<E>, e: Box<RawValue>, w: Arc<NodeResults>) -> NodeResult;
+    async fn call(self, q: Arc<E>, e: Arc<Any + Sync + Send>, w: Arc<NodeResults>) -> NodeResult;
 }
 
 #[async_trait]
 impl<F, Fut, E> AsyncHandler<E> for F
 where
-    F: FnOnce(Arc<E>, Box<RawValue>, Arc<NodeResults>) -> Fut + Clone + Send + Sync + 'static,
+    F: FnOnce(Arc<E>, Arc<Any + Sync + Send>, Arc<NodeResults>) -> Fut
+        + Clone
+        + Send
+        + Sync
+        + 'static,
     Fut: Future<Output = NodeResult> + Send,
     E: Send + Sync + 'static,
 {
-    async fn call(self, q: Arc<E>, e: Box<RawValue>, w: Arc<NodeResults>) -> NodeResult {
+    async fn call(self, q: Arc<E>, e: Arc<Any + Sync + Send>, w: Arc<NodeResults>) -> NodeResult {
         self(q, e, w).await
     }
 }
@@ -640,7 +644,7 @@ struct AsyncContainer<B> {
 unsafe impl<B> Send for AsyncContainer<B> {}
 unsafe impl<B> Sync for AsyncContainer<B> {}
 
-impl<B, E> Service<(Arc<E>, Box<RawValue>, Arc<NodeResults>)> for AsyncContainer<B>
+impl<B, E> Service<(Arc<E>, Arc<Any + Sync + Send>, Arc<NodeResults>)> for AsyncContainer<B>
 where
     B: AsyncHandler<E>,
 {
@@ -652,7 +656,7 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, q: (Arc<E>, Box<RawValue>, Arc<NodeResults>)) -> Self::Future {
+    fn call(&mut self, q: (Arc<E>, Arc<Any + Sync + Send>, Arc<NodeResults>)) -> Self::Future {
         let ft = AsyncHandler::call(self.handler.clone(), q.0, q.1, q.2);
         AsyncHandlerFuture { inner: ft }
     }

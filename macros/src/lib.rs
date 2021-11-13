@@ -121,7 +121,7 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
 
             async fn async_calc2<E: Send + Sync>(
                 graph_args: Arc<E>,
-                params: Box<Any + Send>,
+                params: Arc<Any + Send + Sync>,
                 input: Arc<anyflow::NodeResults>,
             ) -> NodeResult {
                 #fn_content2

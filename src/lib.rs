@@ -15,7 +15,7 @@ macro_rules! resgiter_node{
                 &'static str,
                 fn(
                     Arc<_>,
-                    Box<_>,
+                    Arc<_>,
                     Arc<_>,
                 ) -> Pin<Box<dyn futures::Future<Output = NodeResult> + std::marker::Send>>,
                 Box<Fn(Box<serde_json::value::RawValue>) -> Arc<(dyn Any + std::marker::Send + Sync)>>,
@@ -26,7 +26,7 @@ macro_rules! resgiter_node{
                 {
                     data.push((
                         $x::generate_config().name,
-                        $x::async_calc,
+                        $x::async_calc2,
                         Box::new($x::config_generate),
                         $x::generate_config().has_config,
                     ));
