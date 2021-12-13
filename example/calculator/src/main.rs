@@ -9,13 +9,13 @@ use std::sync::Arc;
 use std::sync::Mutex;
 // use anyflow::FlowResult;
 use anyflow;
-use anyflow::dag::NodeResults;
+use anyflow::dag::OpResults;
 use anyflow::resgiter_node;
 use anyflow::AnyHandler;
 use anyflow::AsyncHandler;
 use anyflow::HandlerInfo;
 use anyflow::HandlerType;
-use anyflow::NodeResult;
+use anyflow::OpResult;
 use async_trait::async_trait;
 use macros::AnyFlowNode;
 use std::any::Any;
@@ -29,8 +29,8 @@ struct Val {
 struct Placeholder {} // TODO: remove
 
 #[AnyFlowNode(Val)]
-fn calc<E: Send + Sync>(graph_args: Arc<E>, p: Val, input: Arc<NodeResults>) -> NodeResult {
-    let mut r = NodeResult::default();
+fn calc<E: Send + Sync>(graph_args: Arc<E>, p: Val, input: Arc<OpResults>) -> OpResult {
+    let mut r = OpResult::default();
     let mut sum: i32 = 0;
     for idx in 0..input.len() {
         match input.get::<i32>(idx) {
@@ -38,7 +38,7 @@ fn calc<E: Send + Sync>(graph_args: Arc<E>, p: Val, input: Arc<NodeResults>) -> 
             Err(e) => {}
         }
     }
-    NodeResult::ok(sum + p.val)
+    OpResult::ok(sum + p.val)
 }
 
 #[derive(Default)]
@@ -48,8 +48,8 @@ struct P {
 }
 
 #[AnyFlowNode]
-fn any_demo<E: Send + Sync>(_graph_args: Arc<E>, input: Arc<NodeResults>) -> NodeResult {
-    NodeResult::ok(P::default())
+fn any_demo<E: Send + Sync>(_graph_args: Arc<E>, input: Arc<OpResults>) -> OpResult {
+    OpResult::ok(P::default())
 }
 
 fn smol_main() {
@@ -95,7 +95,7 @@ fn main() {
     async_std_main();
     // tokio_main();
     let q: i32 = 5;
-    let mut a = anyflow::NodeResult::Ok(Arc::new(Mutex::new(5)));
+    let mut a = anyflow::OpResult::Ok(Arc::new(Mutex::new(5)));
     let p = a.get::<Mutex<i32>>();
     // let mut u = ;
     *p.unwrap().lock().unwrap() = 6;

@@ -4,8 +4,8 @@ pub use dag::AnyHandler;
 pub use dag::AsyncHandler;
 pub use dag::HandlerInfo;
 pub use dag::HandlerType;
-pub use dag::NodeResult;
-pub use dag::NodeResults;
+pub use dag::OpResult;
+pub use dag::OpResults;
 
 #[macro_export]
 macro_rules! resgiter_node{
@@ -17,7 +17,7 @@ macro_rules! resgiter_node{
                     Arc<_>,
                     Arc<_>,
                     Arc<_>,
-                ) -> Pin<Box<dyn futures::Future<Output = NodeResult> + std::marker::Send>>,
+                ) -> Pin<Box<dyn futures::Future<Output = OpResult> + std::marker::Send>>,
                 Box<Fn(Box<serde_json::value::RawValue>) -> Arc<(dyn Any + std::marker::Send + Sync)>>,
                 bool,
             )> = Vec::new();

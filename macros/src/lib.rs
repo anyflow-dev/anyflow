@@ -16,13 +16,28 @@ use syn::NestedMeta;
 use syn::NestedMeta::Meta;
 use syn::{
     braced, parse_macro_input, token, Attribute, AttributeArgs, DeriveInput, Ident, Item, ItemFn,
-    Pat, Result, Token,
+    Pat, PathSegment, Result, Token, Type,
 };
 
 fn get_val(val: &FnArg) -> Ident {
     let temp = if let FnArg::Typed(val) = val {
         match &*val.pat {
             Pat::Ident(i) => Some(i.ident.clone()),
+            _ => None,
+        }
+    } else {
+        None
+    };
+    temp.unwrap()
+}
+
+fn get_type(val: &FnArg) -> PathSegment {
+    let temp = if let FnArg::Typed(val) = val {
+        match &*val.ty {
+            Type::Path(i) => {
+                println!("xxx {:?}", i.path.segments[0]);
+                Some(i.path.segments[0].clone())
+            }
             _ => None,
         }
     } else {
@@ -55,9 +70,10 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
 
     let first_arg = get_val(&input_args[0]);
     let second_arg = get_val(&input_args[1]);
+    let first_arg_type = get_type(&input_args[0]);
 
     let mut fn_content = quote! {
-        let handle = |#first_arg, #second_arg: Arc<anyflow::NodeResults>| {
+        let handle = |#first_arg, #second_arg: Arc<anyflow::OpResults>| {
             #fn_itself
         };
         handle(graph_args, input)
@@ -68,6 +84,7 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
 
     if params_info.len() > 0 && input_args.len() == 3 {
         println!("params_info {:?}", params_info[0].clone());
+        println!("params_info {:?}", input_args.clone());
         if let Meta(Path(ast)) = &params_info[0] {
             config_type = ast.segments[0].ident.clone();
         }
@@ -75,7 +92,7 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
         let third_arg = &get_val(&input_args[2]);
 
         fn_content = quote! {
-            let handle = |#first_arg, #second_arg: #config_type, #third_arg: Arc<anyflow::NodeResults>| {
+            let handle = |#first_arg: #first_arg_type, #second_arg: #config_type, #third_arg: Arc<anyflow::OpResults>| {
                 #fn_itself
             };
             let p: #config_type = serde_json::from_str(params.get()).unwrap();
@@ -83,7 +100,7 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
         };
 
         fn_content2 = quote! {
-            let handle = |#first_arg, #second_arg: &#config_type, #third_arg: Arc<anyflow::NodeResults>| {
+            let handle = |#first_arg: #first_arg_type, #second_arg: &#config_type, #third_arg: Arc<anyflow::OpResults>| {
                 #fn_itself
             };
             let p = params.downcast_ref::<#config_type>().unwrap();
@@ -106,24 +123,25 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
 
         #[async_trait]
         impl AnyHandler for #fn_name {
-            fn config_generate(input: Box<RawValue>) 
+            type Req = #first_arg_type;
+            fn config_generate(input: Box<RawValue>)
                 -> Arc<(dyn Any + std::marker::Send + Sync)> {
                 let c : Arc<#config_type> = Arc::new(serde_json::from_str(input.get()).unwrap());
                 c
             }
-            async fn async_calc<E: Send + Sync>(
-                graph_args: Arc<E>,
+            async fn async_calc(
+                graph_args: #first_arg_type,
                 params: Box<RawValue>,
-                input: Arc<anyflow::NodeResults>,
-            ) -> NodeResult {
+                input: Arc<anyflow::OpResults>,
+            ) -> OpResult {
                 #fn_content
             }
 
-            async fn async_calc2<E: Send + Sync>(
-                graph_args: Arc<E>,
+            async fn async_calc2(
+                graph_args: #first_arg_type,
                 params: Arc<Any + Send + Sync>,
-                input: Arc<anyflow::NodeResults>,
-            ) -> NodeResult {
+                input: Arc<anyflow::OpResults>,
+            ) -> OpResult {
                 #fn_content2
             }
         }

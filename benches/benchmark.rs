@@ -15,11 +15,11 @@ struct Val {
 fn calc<'a, E: Send + Sync>(
     _graph_args: &'a Arc<E>,
     params: &'a Box<RawValue>,
-    input: &anyflow::NodeResults,
-) -> anyflow::NodeResult {
+    input: &anyflow::OpResults,
+) -> anyflow::OpResult {
     let p: Val = serde_json::from_str(params.get()).unwrap();
 
-    let _r = anyflow::NodeResult::default();
+    let _r = anyflow::OpResult::default();
     let mut sum: i32 = 0;
     // println!("xxx{:?}", input.len());
 
@@ -30,17 +30,17 @@ fn calc<'a, E: Send + Sync>(
         }
     }
 
-    anyflow::NodeResult::ok(sum + p.val)
+    anyflow::OpResult::ok(sum + p.val)
 }
 
 async fn async_calc<E: Send + Sync>(
     _graph_args: Arc<E>,
     params: Box<RawValue>,
-    input: Arc<anyflow::NodeResults>,
-) -> anyflow::NodeResult {
+    input: Arc<anyflow::OpResults>,
+) -> anyflow::OpResult {
     let p: Val = serde_json::from_str(params.get()).unwrap();
 
-    let _r = anyflow::NodeResult::default();
+    let _r = anyflow::OpResult::default();
     let mut sum: i32 = 0;
     // println!("xxx{:?}", input.len());
 
@@ -51,7 +51,7 @@ async fn async_calc<E: Send + Sync>(
         }
     }
 
-    anyflow::NodeResult::ok(sum + p.val)
+    anyflow::OpResult::ok(sum + p.val)
 }
 
 fn smol_main(times: i32) {
