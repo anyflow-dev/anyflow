@@ -80,7 +80,7 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
     };
     let mut fn_content2 = fn_content.clone();
 
-    let mut config_type = Ident::new("Placeholder", Span::call_site());
+    let mut config_type : syn::Ident = Ident::new("EmptyPlaceHolder", Span::call_site());
 
     if params_info.len() > 0 && input_args.len() == 3 {
         println!("params_info {:?}", params_info[0].clone());
@@ -129,13 +129,6 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
                 let c : Arc<#config_type> = Arc::new(serde_json::from_str(input.get()).unwrap());
                 c
             }
-            async fn async_calc(
-                graph_args: #first_arg_type,
-                params: Box<RawValue>,
-                input: Arc<anyflow::OpResults>,
-            ) -> OpResult {
-                #fn_content
-            }
 
             async fn async_calc2(
                 graph_args: #first_arg_type,
@@ -143,6 +136,83 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
                 input: Arc<anyflow::OpResults>,
             ) -> OpResult {
                 #fn_content2
+            }
+        }
+    };
+    println!("{}", format!("xxx {:?}", tokens.to_string()));
+    tokens.into()
+}
+
+#[proc_macro_attribute]
+pub fn SimpleNode(params: TokenStream, code: TokenStream) -> TokenStream {
+    let pp = code.clone();
+    let qq = code.clone();
+    let input = parse_macro_input!(pp as ItemFn);
+    let input2 = parse_macro_input!(qq as ItemFn);
+    let input_args = input2.sig.inputs.iter().cloned().collect::<Vec<FnArg>>();
+    println!("input2 {:?}", input_args[0]);
+    println!("xxxx {:?}", input.clone().sig.ident);
+    println!(
+        "block {:?}",
+        input.clone().block.into_token_stream().to_string()
+    );
+    let fn_name = input.sig.ident;
+    let fn_itself = input.block;
+    let method_name = stringify!(fn_name);
+    let params_info = parse_macro_input!(params as AttributeArgs);
+    println!("xxxpppp {:?}", input_args.len());
+    if input_args.len() < 1 {
+        panic!("invalid input");
+    }
+    let first_arg_type = get_type(&input_args[0]);
+    let first_arg = get_val(&input_args[0]);
+    let mut config_type = quote! {anyflow::EmptyPlaceHolder}; // make a default one
+
+    let mut extract_args = vec![quote! {}];
+    for i in 1..input_args.len() {
+        let arg_name = get_val(&input_args[i]);
+        let arg_type = get_type(&input_args[i]);
+        let idx = i - 1;
+        extract_args.push(quote! {
+            let #arg_name = input.get::<#arg_type>( #idx );
+        })
+    }
+
+    let mut fn_content = quote! {
+        let handle = |#first_arg| {
+            #fn_itself
+        };
+        handle(graph_args, input)
+    };
+
+    let tokens = quote! {
+        struct #fn_name {}
+
+        impl #fn_name {
+            fn generate_config() -> anyflow::HandlerInfo{
+                HandlerInfo{
+                name: stringify!(#fn_name),
+                method_type: anyflow::HandlerType::Async,
+                has_config: false,
+                }
+            }
+        }
+
+        #[async_trait]
+        impl AnyHandler for #fn_name {
+            type Req = #first_arg_type;
+            fn config_generate(input: Box<RawValue>)
+                -> Arc<(dyn Any + std::marker::Send + Sync)> {
+                let c : Arc<#config_type> = Arc::new(serde_json::from_str(input.get()).unwrap());
+                c
+            }
+
+            async fn async_calc2(
+                graph_args: #first_arg_type,
+                params: Arc<Any + Send + Sync>,
+                input: Arc<anyflow::OpResults>,
+            ) -> OpResult {
+                OpResult::default()
             }
         }
     };

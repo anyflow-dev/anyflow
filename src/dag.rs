@@ -26,11 +26,6 @@ use tower_service::Service;
 pub trait AnyHandler {
     type Req: Send + Sync;
     fn config_generate(input: Box<RawValue>) -> Arc<Send + Any + Sync>;
-    async fn async_calc(
-        _graph_args: Self::Req,
-        params: Box<RawValue>,
-        input: Arc<OpResults>,
-    ) -> OpResult;
 
     async fn async_calc2(
         _graph_args: Self::Req,
@@ -48,6 +43,10 @@ pub struct HandlerInfo {
 pub enum HandlerType {
     Async,
     Sync,
+}
+
+#[derive(Deserialize)]
+pub struct EmptyPlaceHolder {
 }
 
 #[derive(Debug, Clone)]
