@@ -9,7 +9,7 @@ use anyflow::HandlerInfo;
 use anyflow::OpResult;
 use async_trait::async_trait;
 use futures::future::FutureExt;
-use macros::{AnyFlowNode, SimpleNode};
+use macros::{AnyFlowNode, SimpleNode, AnyFlowNodeWithParams};
 use redis::Commands;
 use redis::Connection;
 use redis::RedisResult;
@@ -48,7 +48,7 @@ struct Val {
     key: String,
 }
 
-#[AnyFlowNode(Val)]
+#[AnyFlowNodeWithParams]
 fn redis_op(graph_args: Arc<Req>, p: Val, input: Arc<OpResults>) -> OpResult {
     let count: i32 = input
         .get::<Mutex<Connection>>(0)
@@ -60,8 +60,8 @@ fn redis_op(graph_args: Arc<Req>, p: Val, input: Arc<OpResults>) -> OpResult {
     OpResult::ok(count)
 }
 
-#[AnyFlowNode(Val)]
-fn redis_con_op(graph_args: Arc<Req>, p: Val, input: Arc<OpResults>) -> OpResult {
+#[AnyFlowNode]
+fn redis_con_op(graph_args: Arc<Req>, input: Arc<OpResults>) -> OpResult {
     let mut con: Mutex<Connection> = Mutex::new(
         redis::Client::open(REDIS_ADDR)
             .unwrap()
@@ -71,7 +71,7 @@ fn redis_con_op(graph_args: Arc<Req>, p: Val, input: Arc<OpResults>) -> OpResult
     OpResult::ok(con)
 }
 
-#[AnyFlowNode(Val)]
+#[AnyFlowNodeWithParams]
 fn redis_set_op(graph_args: Arc<Req>, p: Val, input: Arc<OpResults>) -> OpResult {
     let prev = input.get::<i32>(0).unwrap();
     input
