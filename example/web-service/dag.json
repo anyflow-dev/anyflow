@@ -1,0 +1,161 @@
+{
+    "nodes": [{
+            "name": "start_node",
+            "node": "redis_con_op",
+            "deps": []
+        },
+        {
+            "name": "1_get_node",
+            "node": "redis_op",
+            "deps": [
+                "start_node"
+            ],
+            "params": {
+                "key": "1",
+                "name": "1_get_node"
+            }
+        },
+        {
+            "name": "2_get_node",
+            "node": "redis_op",
+            "deps": [
+                "start_node"
+            ],
+            "params": {
+                "key": "2",
+                "name": "2_get_node"
+            }
+        },
+        {
+            "name": "3_get_node",
+            "node": "redis_op",
+            "deps": [
+                "start_node"
+            ],
+            "params": {
+                "key": "3",
+                "name": "3_get_node"
+            }
+        },
+        {
+            "name": "4_get_node",
+            "node": "redis_op",
+            "deps": [
+                "start_node"
+            ],
+            "params": {
+                "key": "4",
+                "name": "4_get_node"
+            }
+        },
+        {
+            "name": "1_set_node",
+            "node": "redis_set_op",
+            "deps": [
+                "1_get_node"
+            ],
+            "params": {
+                "key": "5",
+                "name": "1_set_node"
+            }
+        },
+        {
+            "name": "2_set_node",
+            "node": "redis_set_op",
+            "deps": [
+                "2_get_node"
+            ],
+            "params": {
+                "key": "6",
+                "name": "2_set_node"
+            }
+        },
+        {
+            "name": "3_set_node",
+            "node": "redis_set_op",
+            "deps": [
+                "3_get_node"
+            ],
+            "params": {
+                "key": "7",
+                "name": "3_set_node"
+            }
+        },
+        {
+            "name": "4_set_node",
+            "node": "redis_set_op",
+            "deps": [
+                "4_get_node"
+            ],
+            "params": {
+                "key": "8",
+                "name": "4_set_node"
+            }
+        },
+        {
+            "name": "5_set_node",
+            "node": "redis_set_op",
+            "deps": [
+                "1_get_node",
+                "1_set_node"
+            ],
+            "params": {
+                "key": "8",
+                "name": "5_set_node"
+            }
+        },
+        {
+            "name": "6_set_node",
+            "node": "redis_set_op",
+            "deps": [
+                "2_get_node",
+                "2_set_node"
+            ],
+            "params": {
+                "key": "8",
+                "name": "6_set_node"
+            }
+        },
+        {
+            "name": "7_set_node",
+            "node": "redis_set_op",
+            "deps": [
+                "3_get_node",
+                "3_set_node",
+                "6_set_node"
+            ],
+            "params": {
+                "key": "8",
+                "name": "7_set_node"
+            }
+        },
+        {
+            "name": "8_set_node",
+            "node": "redis_set_op",
+            "deps": [
+                "4_get_node",
+                "4_set_node",
+                "5_set_node",
+                "1_get_node"
+            ],
+            "params": {
+                "key": "8",
+                "name": "8_set_node"
+            }
+        },
+        {
+            "name": "pack_node",
+            "node": "pack_op",
+            "deps": [
+                "1_set_node",
+                "2_set_node",
+                "3_set_node",
+                "4_set_node",
+                "5_set_node",
+                "6_set_node",
+                "7_set_node",
+                "8_set_node"
+            ]
+        }
+    ]
+}
