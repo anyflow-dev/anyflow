@@ -7,7 +7,7 @@ use futures::future::Shared;
 use futures::Future;
 use futures::StreamExt;
 use futures::{future::BoxFuture, ready};
-use log::{info, warn};
+
 use pin_project::pin_project;
 use serde::Deserialize;
 use serde_json::value::RawValue;
@@ -24,11 +24,11 @@ use tower_service::Service;
 #[async_trait]
 pub trait AnyHandler {
     type Req: Send + Sync;
-    fn config_generate(input: Box<RawValue>) -> Arc<Send + Any + Sync>;
+    fn config_generate(input: Box<RawValue>) -> Arc<dyn Send + Any + Sync>;
 
     async fn async_calc2(
         _graph_args: Self::Req,
-        params: Arc<Any + Send + Sync>,
+        params: Arc<dyn Any + Send + Sync>,
         input: Arc<OpResults>,
     ) -> OpResult;
 }
@@ -216,7 +216,7 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
         Arc<
             Mutex<
                 dyn Service<
-                        (Arc<E>, Arc<Any + Sync + Send>, Arc<OpResults>),
+                        (Arc<E>, Arc<dyn Any + Sync + Send>, Arc<OpResults>),
                         Response = OpResult,
                         Error = &'static str,
                         Future = AsyncHandlerFuture,
@@ -234,7 +234,7 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
     has_node_config_repo: HashMap<String, bool>,
     node_config_generator_repo: HashMap<
         String,
-        Arc<Fn(Box<RawValue>) -> Arc<dyn Any + std::marker::Send + Sync> + Send + Sync>,
+        Arc<dyn Fn(Box<RawValue>) -> Arc<dyn Any + std::marker::Send + Sync> + Send + Sync>,
     >,
 }
 
@@ -288,7 +288,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         handlers_ganerator: &dyn Fn() -> Vec<(
             &'static str,
             H,
-            Arc<Fn(Box<RawValue>) -> Arc<(dyn Any + std::marker::Send + Sync)> + Send + Sync>,
+            Arc<dyn Fn(Box<RawValue>) -> Arc<(dyn Any + std::marker::Send + Sync)> + Send + Sync>,
             bool,
         )>,
     ) where
@@ -457,7 +457,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                     Arc::new(
                         self.has_node_config_repo
                             .iter()
-                            .map(|(key, val)| (key.clone(), val.clone()))
+                            .map(|(key, val)| (key.clone(), *val))
                             .collect(),
                     ),
                 )
@@ -516,7 +516,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                 Arc<
                     Mutex<
                         dyn Service<
-                                (Arc<E>, Arc<Any + Sync + Send>, Arc<OpResults>),
+                                (Arc<E>, Arc<dyn Any + Sync + Send>, Arc<OpResults>),
                                 Response = OpResult,
                                 Error = &'static str,
                                 Future = AsyncHandlerFuture,
@@ -636,13 +636,13 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
 
 #[async_trait]
 pub trait AsyncHandler<E>: Clone + Sync + Send + Sized + 'static {
-    async fn call(self, q: Arc<E>, e: Arc<Any + Sync + Send>, w: Arc<OpResults>) -> OpResult;
+    async fn call(self, q: Arc<E>, e: Arc<dyn Any + Sync + Send>, w: Arc<OpResults>) -> OpResult;
 }
 
 #[async_trait]
 impl<F, Fut, E> AsyncHandler<E> for F
 where
-    F: FnOnce(Arc<E>, Arc<Any + Sync + Send>, Arc<OpResults>) -> Fut
+    F: FnOnce(Arc<E>, Arc<dyn Any + Sync + Send>, Arc<OpResults>) -> Fut
         + Clone
         + Send
         + Sync
@@ -650,7 +650,7 @@ where
     Fut: Future<Output = OpResult> + Send,
     E: Send + Sync + 'static,
 {
-    async fn call(self, q: Arc<E>, e: Arc<Any + Sync + Send>, w: Arc<OpResults>) -> OpResult {
+    async fn call(self, q: Arc<E>, e: Arc<dyn Any + Sync + Send>, w: Arc<OpResults>) -> OpResult {
         self(q, e, w).await
     }
 }
@@ -664,7 +664,7 @@ struct AsyncContainer<B> {
 unsafe impl<B> Send for AsyncContainer<B> {}
 unsafe impl<B> Sync for AsyncContainer<B> {}
 
-impl<B, E> Service<(Arc<E>, Arc<Any + Sync + Send>, Arc<OpResults>)> for AsyncContainer<B>
+impl<B, E> Service<(Arc<E>, Arc<dyn Any + Sync + Send>, Arc<OpResults>)> for AsyncContainer<B>
 where
     B: AsyncHandler<E>,
 {
@@ -676,7 +676,7 @@ where
         Poll::Ready(Ok(()))
     }
 
-    fn call(&mut self, q: (Arc<E>, Arc<Any + Sync + Send>, Arc<OpResults>)) -> Self::Future {
+    fn call(&mut self, q: (Arc<E>, Arc<dyn Any + Sync + Send>, Arc<OpResults>)) -> Self::Future {
         let ft = AsyncHandler::call(self.handler.clone(), q.0, q.1, q.2);
         AsyncHandlerFuture { inner: ft }
     }
