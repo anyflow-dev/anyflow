@@ -7,14 +7,13 @@ use futures::future::Shared;
 use futures::Future;
 use futures::StreamExt;
 use futures::{future::BoxFuture, ready};
+use log::{info, warn};
 use pin_project::pin_project;
 use serde::Deserialize;
 use serde_json::value::RawValue;
 use std::any::Any;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
-
-// use macros::AnyFlowNode;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll};
@@ -45,13 +44,12 @@ pub enum HandlerType {
     Sync,
 }
 
-#[derive(Deserialize)]
-pub struct EmptyPlaceHolder {
-}
+#[derive(Deserialize, Default)]
+pub struct EmptyPlaceHolder {}
 
 #[derive(Debug, Clone)]
 pub enum OpResult {
-    Ok(Arc<dyn Any + std::marker::Send>),
+    Ok(Arc<dyn Any + std::marker::Send + std::marker::Sync>),
     Err(String),
     None,
 }
@@ -59,6 +57,7 @@ pub enum OpResult {
 unsafe impl Send for OpResult {}
 unsafe impl Sync for OpResult {}
 
+#[derive(Debug)]
 pub struct OpResults {
     inner: Vec<Arc<OpResult>>,
 }
@@ -102,6 +101,25 @@ impl OpResults {
     pub fn len(&self) -> usize {
         self.inner.len()
     }
+
+    pub fn get_arc(
+        &self,
+        idx: usize,
+    ) -> Option<Arc<dyn Any + std::marker::Send + std::marker::Sync>> {
+        if idx >= self.inner.len() {
+            None
+        } else {
+            self.inner[idx].get_arc()
+        }
+    }
+
+    pub fn at(&self, idx: usize) -> Option<&OpResult> {
+        if idx >= self.inner.len() {
+            None
+        } else {
+            Some(&self.inner[idx])
+        }
+    }
 }
 
 impl OpResult {
@@ -132,8 +150,16 @@ impl OpResult {
         }
     }
 
-    pub fn ok<T: Any + Send>(t: T) -> OpResult {
+    pub fn ok<T: Any + Send + Sync>(t: T) -> OpResult {
         OpResult::Ok(Arc::new(t))
+    }
+
+    fn get_arc(&self) -> Option<Arc<dyn Any + std::marker::Send + std::marker::Sync>> {
+        match &self {
+            OpResult::Ok(val) => Some(Arc::clone(val)),
+            OpResult::Err(_e) => None,
+            OpResult::None => None,
+        }
     }
 }
 
@@ -148,6 +174,7 @@ struct NodeConfig {
     name: String,
     node: String,
     deps: Vec<String>,
+    #[serde(default)]
     params: Box<RawValue>,
     #[serde(default)]
     necessary: bool,
@@ -163,10 +190,11 @@ pub struct DAGConfig {
 #[derive(Debug, Clone)]
 pub struct DAGNode {
     node_config: NodeConfig,
-    prevs: HashSet<String>,
-    nexts: HashSet<String>,
+    prevs: Vec<String>,
+    nexts: Vec<String>,
 }
 
+#[derive(Clone)]
 pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
     nodes: HashMap<String, Box<DAGNode>>,
 
@@ -175,17 +203,12 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
     pre: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a Arc<OpResults>) -> T + Send + Sync>,
     post: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a Arc<OpResults>, &T) + Send + Sync>,
     timeout_cb: Arc<dyn for<'b> Fn(Arc<DAGNode>, &'b Arc<OpResults>) + Send + Sync>,
-    failure_cb:
-        Arc<dyn for<'a> Fn(Arc<DAGNode>, &'a Arc<OpResults>, &'a OpResult) + Send + Sync>,
+    failure_cb: Arc<dyn for<'a> Fn(Arc<DAGNode>, &'a Arc<OpResults>, &'a OpResult) + Send + Sync>,
 
     // register
     node_mapping: HashMap<
         String,
-        Arc<
-            dyn for<'a> Fn(&'a Arc<E>, &'a Box<RawValue>, &'a OpResults) -> OpResult
-                + Send
-                + Sync,
-        >,
+        Arc<dyn for<'a> Fn(&'a Arc<E>, &'a Box<RawValue>, &'a OpResults) -> OpResult + Send + Sync>,
     >,
 
     async_node_mapping: HashMap<
@@ -209,8 +232,10 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
     // config cache
     node_config_repo: HashMap<String, Arc<dyn Any + std::marker::Send + Sync>>,
     has_node_config_repo: HashMap<String, bool>,
-    node_config_generator_repo:
-        HashMap<String, Box<Fn(Box<RawValue>) -> Arc<dyn Any + std::marker::Send + Sync>>>,
+    node_config_generator_repo: HashMap<
+        String,
+        Arc<Fn(Box<RawValue>) -> Arc<dyn Any + std::marker::Send + Sync> + Send + Sync>,
+    >,
 }
 
 impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Default for Flow<T, E> {
@@ -263,7 +288,7 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         handlers_ganerator: &dyn Fn() -> Vec<(
             &'static str,
             H,
-            Box<Fn(Box<RawValue>) -> Arc<(dyn Any + std::marker::Send + Sync)>>,
+            Arc<Fn(Box<RawValue>) -> Arc<(dyn Any + std::marker::Send + Sync)> + Send + Sync>,
             bool,
         )>,
     ) where
@@ -294,8 +319,8 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                 node_config.name.clone(),
                 Box::new(DAGNode {
                     node_config: node_config.clone(),
-                    nexts: HashSet::new(),
-                    prevs: HashSet::new(),
+                    nexts: Vec::new(),
+                    prevs: Vec::new(),
                 }),
             );
         }
@@ -314,12 +339,12 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                     .get_mut(&node_config.name.clone())
                     .unwrap()
                     .prevs
-                    .insert(dep.clone());
+                    .push(dep.clone());
                 self.nodes
                     .get_mut(&dep.clone())
                     .unwrap()
                     .nexts
-                    .insert(node_config.name.clone());
+                    .push(node_config.name.clone());
             }
 
             if !self.async_node_mapping.contains_key(&node_config.node) {
@@ -360,9 +385,9 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
             return true;
         }
 
-        path.insert(cur);
+        path.insert(cur.clone());
         for next in &node.nexts {
-            if !self.check_flow(path, next.to_string()) {
+            if !self.check_flow(&mut path.clone(), next.to_string()) {
                 return false;
             }
         }
@@ -515,35 +540,38 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                 .unwrap()
                 .prevs
                 .iter()
-                .filter(|prev| !have_handled.lock().unwrap().contains(&prev.to_string()))
                 .map(|prev| {
-                    let prev_ptr = Arc::new(prev);
-                    dag_futures.lock().unwrap().insert(
-                        prev.to_string(),
-                        Flow::<T, E>::dfs_node(
-                            Arc::clone(&dag_futures),
-                            Arc::clone(&have_handled),
-                            Arc::clone(&nodes),
-                            prev_ptr.to_string(),
-                            Arc::clone(&pre_fn),
-                            Arc::clone(&post_fn),
-                            Arc::clone(&timeout_cb_fn),
-                            Arc::clone(&failure_cb_fn),
-                            Arc::clone(&node_mapping),
-                            Arc::clone(&async_node_mapping),
-                            Arc::clone(&args),
-                            Arc::clone(&cached_repo),
-                            Arc::clone(&node_config_repo),
-                            Arc::clone(&has_node_config_repo),
-                        )
-                        .boxed()
-                        .shared(),
-                    );
-                    have_handled.lock().unwrap().insert(prev_ptr.to_string());
-                    dag_futures.lock().unwrap().get(prev).unwrap().clone()
+                    if have_handled.lock().unwrap().contains(&prev.to_string()) {
+                        dag_futures.lock().unwrap().get(prev).unwrap().clone()
+                    } else {
+                        let prev_ptr = Arc::new(prev);
+                        dag_futures.lock().unwrap().insert(
+                            prev.to_string(),
+                            Flow::<T, E>::dfs_node(
+                                Arc::clone(&dag_futures),
+                                Arc::clone(&have_handled),
+                                Arc::clone(&nodes),
+                                prev_ptr.to_string(),
+                                Arc::clone(&pre_fn),
+                                Arc::clone(&post_fn),
+                                Arc::clone(&timeout_cb_fn),
+                                Arc::clone(&failure_cb_fn),
+                                Arc::clone(&node_mapping),
+                                Arc::clone(&async_node_mapping),
+                                Arc::clone(&args),
+                                Arc::clone(&cached_repo),
+                                Arc::clone(&node_config_repo),
+                                Arc::clone(&has_node_config_repo),
+                            )
+                            .boxed()
+                            .shared(),
+                        );
+                        have_handled.lock().unwrap().insert(prev_ptr.to_string());
+                        dag_futures.lock().unwrap().get(prev).unwrap().clone()
+                    }
                 })
-                .collect();
-        }
+                .collect()
+        };
 
         let mut collector = Vec::with_capacity(deps.len());
         while let Some(item) = deps.next().await {
@@ -553,12 +581,6 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
         let prev_results = Arc::new(OpResults { inner: collector });
 
         let params_ptr = node_config_repo.get(&node).unwrap();
-        // println!("xxx {:?}", node_mapping.keys());
-        // let handle_fn = Arc::clone(
-        //     node_mapping
-        //         .get(&nodes.get(&node).unwrap().node_config.node)
-        //         .unwrap(),
-        // );
         let async_handle_fn = Arc::clone(
             async_node_mapping
                 .get(&nodes.get(&node).unwrap().node_config.node)
@@ -585,8 +607,6 @@ impl<T: 'static + Default + Send + Sync, E: 'static + Send + Sync> Flow<T, E> {
                     Arc::clone(&prev_results),
                 ));
                 v.await.unwrap()
-                // handle_fn(&arg_ptr, params_ptr, &prev_results)
-                // handle_fn(&arg_ptr, Arc::clone(&prev_res), params_ptr)
             })
             .await
             {
@@ -692,90 +712,4 @@ impl Future for AsyncHandlerFuture {
         let cur = ready!(this.inner.poll(cx));
         Poll::Ready(Ok(cur))
     }
-}
-
-fn get<H>(_handler: H)
-where
-    H: Handler,
-{
-}
-
-async fn d(_r: i32) -> i32 {
-    5
-}
-
-fn demo() {
-    get::<_>(d);
-}
-
-#[derive(Default)]
-struct B {}
-
-struct A {
-    c: HashMap<String, Arc<dyn Fn(Arc<B>) -> Pin<Box<dyn std::future::Future<Output = i32>>>>>,
-    q: HashMap<String, Arc<dyn Fn(Arc<B>) -> dyn std::future::Future<Output = i32>>>,
-    d: HashMap<String, Arc<dyn Fn(Arc<B>) -> Arc<Arc<i32>> + Sync + Send>>,
-    // w: dyn Fn(Arc<B>) -> dyn std::future::Future<Output = i32>
-    // p: dyn Fn(Arc<B>) -> dyn std::future::Future<Output = i32>,
-    // y: dyn Fn(Arc<B>) -> dyn futures::Future<Output = i32>,
-    // p: Box<dyn Fn(Arc<B>) -> dyn Handler>,
-    t: HashMap<
-        String,
-        Arc<
-            Mutex<
-                dyn Service<
-                    i32,
-                    Response = i32,
-                    Error = &'static str,
-                    Future = Pin<Box<dyn Future<Output = Result<i32, &'static str>>>>,
-                >,
-            >,
-        >,
-    >,
-}
-
-impl A {
-    async fn f(&self) {
-        let b = Arc::new(B::default());
-        // (self.p)(b);
-        let a = (self.c.get("xxx")).unwrap()(b);
-        // let a = (self.q.get("xxx")).unwrap()(b);
-        A::p(Arc::new(a.await));
-        // (*self.y)(b).boxed();
-        // let i = (self.p)(b);
-        // let p = (self.d.get("xxx")).unwrap()(b);
-        // A::p(p);
-        let o = (self.t.get("xxx")).unwrap().lock().unwrap().call(6);
-        // let a = (self.q.get("xxx")).unwrap()(b);
-        A::p(Arc::new(o.await.unwrap()));
-    }
-
-    fn p(_p: Arc<i32>) {}
-}
-
-async fn foo(x: u8) -> u8 {
-    2 * x
-}
-
-struct S<C, F>
-where
-    C: Fn(u8) -> F,
-    F: std::future::Future,
-{
-    foo: C,
-}
-
-impl<C, F> S<C, F>
-where
-    C: Fn(u8) -> F,
-    F: std::future::Future,
-{
-    async fn do_thing(self) {
-        (self.foo)(42).await;
-    }
-}
-
-async fn example() {
-    let s = S { foo };
-    s.do_thing().await;
 }

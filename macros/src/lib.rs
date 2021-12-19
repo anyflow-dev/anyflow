@@ -89,7 +89,7 @@ pub fn AnyFlowNodeWithParams(params: TokenStream, code: TokenStream) -> TokenStr
                 HandlerInfo{
                 name: stringify!(#fn_name),
                 method_type: anyflow::HandlerType::Async,
-                has_config: false,
+                has_config: true,
                 }
             }
         }
@@ -166,7 +166,7 @@ pub fn SimpleNode(params: TokenStream, code: TokenStream) -> TokenStream {
                 HandlerInfo{
                 name: stringify!(#fn_name),
                 method_type: anyflow::HandlerType::Async,
-                has_config: false,
+                has_config: true,
                 }
             }
         }
@@ -176,8 +176,7 @@ pub fn SimpleNode(params: TokenStream, code: TokenStream) -> TokenStream {
             type Req = #first_arg_type;
             fn config_generate(input: Box<RawValue>)
                 -> Arc<(dyn Any + std::marker::Send + Sync)> {
-                let c : Arc<#config_type> = Arc::new(serde_json::from_str(input.get()).unwrap());
-                c
+                Arc::new(anyflow::EmptyPlaceHolder::default())
             }
 
             async fn async_calc2(
@@ -226,7 +225,7 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
     };
     let mut fn_content2 = fn_content.clone();
 
-    let mut config_type : syn::Ident = Ident::new("EmptyPlaceHolder", Span::call_site());
+    let mut config_type: syn::Ident = Ident::new("EmptyPlaceHolder", Span::call_site());
 
     let tokens = quote! {
         struct #fn_name {}
@@ -236,7 +235,7 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
                 HandlerInfo{
                 name: stringify!(#fn_name),
                 method_type: anyflow::HandlerType::Async,
-                has_config: false,
+                has_config: true,
                 }
             }
         }
@@ -246,8 +245,7 @@ pub fn AnyFlowNode(params: TokenStream, code: TokenStream) -> TokenStream {
             type Req = #first_arg_type;
             fn config_generate(input: Box<RawValue>)
                 -> Arc<(dyn Any + std::marker::Send + Sync)> {
-                let c : Arc<#config_type> = Arc::new(serde_json::from_str(input.get()).unwrap());
-                c
+                    Arc::new(anyflow::EmptyPlaceHolder::default())
             }
 
             async fn async_calc2(
