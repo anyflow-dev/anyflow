@@ -200,7 +200,7 @@ pub struct Flow<T: Default + Sync + Send, E: Send + Sync> {
 
     // global configures
     timeout: Duration,
-    pre: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a Arc<OpResults>) -> T + Send + Sync>,
+    pre: Arc<PreFunc<E>>,
     post: Arc<dyn for<'a> Fn(&'a Arc<E>, &'a Arc<OpResults>, &T) + Send + Sync>,
     timeout_cb: Arc<dyn for<'b> Fn(Arc<DAGNode>, &'b Arc<OpResults>) + Send + Sync>,
     failure_cb: Arc<dyn for<'a> Fn(Arc<DAGNode>, &'a Arc<OpResults>, &'a OpResult) + Send + Sync>,
